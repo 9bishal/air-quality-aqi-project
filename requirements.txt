@@ -1,0 +1,18 @@
+# Data processing
+pandas
+numpy
+
+# API requests
+requests
+
+# Database
+sqlalchemy
+psycopg2-binary
+python-dotenv
+
+# Dashboard
+streamlit
+plotly
+
+# Airflow
+apache-airflow
