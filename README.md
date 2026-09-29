@@ -170,7 +170,51 @@ python src/transformation/join_data.py
 python src/transformation/calculate_aqi.py
 ```
 
-The complete workflow will later be executed using Apache Airflow.
+### Running via Apache Airflow (DAG `aqi_pipeline`)
+
+Do not run the DAG as a script (`python airflow/dags/aqi_pipeline.py` only defines the DAG - see `airflow/dags/aqi_pipeline.py:9`). The DAG is parsed by the Airflow scheduler.
+
+DAG file: `airflow/dags/aqi_pipeline.py` (`dag_id="aqi_pipeline"`, `schedule="@daily"`) uses `BashOperator(cwd=PROJECT_ROOT, bash_command="python3 src/...")` so tasks run from project root regardless of Airflow's temp working dir.
+
+Point Airflow to the project DAGs (default `AIRFLOW_HOME` is `~/airflow`):
+
+```bash
+# Option A: set env var (per-command or export)
+export AIRFLOW__CORE__DAGS_FOLDER=/Users/bishalkumarshah/Downloads/air-quality-aqi-project/airflow/dags
+# Option B: symlink
+mkdir -p ~/airflow/dags && ln -sf /Users/bishalkumarshah/Downloads/air-quality-aqi-project/airflow/dags/aqi_pipeline.py ~/airflow/dags/
+```
+
+Initialize DB (first time) and verify DAG parses:
+
+```bash
+airflow db migrate
+airflow dags list | grep aqi_pipeline
+airflow dags list-import-errors
+```
+
+Quick test without scheduler (recommended for development):
+
+```bash
+airflow dags test aqi_pipeline 2026-09-01
+# or single task:
+airflow tasks test aqi_pipeline collect_weather 2026-09-01
+```
+
+Full scheduler run:
+
+```bash
+# Terminal 1: start Airflow (Airflow 3.x)
+airflow standalone
+# or: airflow scheduler & airflow api-server
+
+# Terminal 2: trigger
+airflow dags trigger aqi_pipeline
+airflow dags state aqi_pipeline 2026-09-01
+airflow tasks states-for-dag-run aqi_pipeline <run_id>
+```
+
+Ensure `python3` used by `BashOperator` has dependencies (`pandas`, `requests`, etc. from `requirements.txt:1-18`): use `python3 -m pip install -r requirements.txt` in the same env that runs Airflow.
 
 ## Dashboard
 
@@ -212,17 +256,25 @@ used by the dashboard.
 
 ## Part 2
 
-The second phase of the project will extend the pipeline with:
+The second phase extends the pipeline with AQI prediction (implemented):
 
-- AQI prediction
-- Machine-learning models
-- Feature engineering
-- MLflow experiment tracking
-- Model registry
-- FastAPI
-- Docker
-- Model monitoring
-- Retraining strategy
+- AQI prediction (next-observation AQI value + category)
+- Machine-learning models (LinearRegression / RandomForest + comparison)
+- Feature engineering (`src/features/build_features.py`: lag 1/2/3, rolling 3/7, calendar)
+- MLflow experiment tracking (`sqlite:///mlflow.db`, experiment `aqi_prediction`)
+- Model registry (`aqi_regressor`, `aqi_classifier` + `models/model_metadata.json`)
+- FastAPI (`api/main.py`: `GET /health`, `GET /model-info`, `POST /predict`)
+- Docker (`Dockerfile`: `docker build -t aqi-api . && docker run -p 8000:8000 aqi-api`)
+- Model monitoring (`src/monitoring/monitor.py` → `logs/monitoring_report.json`)
+- Retraining strategy (`docs/model_lifecycle.md`)
+
+```bash
+python3 src/features/build_features.py
+python3 src/models/train.py
+python3 src/monitoring/monitor.py
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+python3 -m pytest tests/ -q
+```
 
 ## Project Status
 

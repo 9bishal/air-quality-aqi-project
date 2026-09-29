@@ -14,5 +14,14 @@ python-dotenv
 streamlit
 plotly
 
+# Machine learning / MLOps (Part 2)
+scikit-learn
+mlflow
+joblib
+
+# Inference API (Part 2)
+fastapi
+uvicorn
+
 # Airflow
 apache-airflow

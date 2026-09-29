@@ -58,6 +58,7 @@ dmypy.json
 *.dump
 
 # ── ML Artifacts (Part 2 - models, experiments) ──
+# NOTE: anchored with leading slash so src/models/ source code stays tracked
 *.pkl
 *.pickle
 *.parquet
@@ -66,10 +67,10 @@ dmypy.json
 *.hdf5
 *.joblib
 *.onnx
-models/
-mlruns/
-mlartifacts/
-checkpoints/
+/models/
+/mlruns/
+/mlartifacts/
+/checkpoints/
 lightning_logs/
 
 # ── Airflow ──
@@ -153,3 +154,7 @@ Desktop.ini
 *.temp
 *.bak
 *.orig
+
+
+.claude/skills/developing-with-streamlit
+.agents/skills/developing-with-streamlit
