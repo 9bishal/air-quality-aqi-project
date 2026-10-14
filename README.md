@@ -185,6 +185,39 @@ OPENAQ_API_KEY=your_openaq_api_key
 
 ---
 
+## Quick Start — start commands
+
+Build the Part 2 artifacts once, then start each service in its own
+terminal (project root, venv activated). Windows uses `python`,
+macOS/Linux uses `python3`.
+
+```bash
+# One-time build (creates data/gold/ml_features.csv + models/*.joblib)
+python src/features/build_features.py
+python src/models/train.py
+```
+
+```bash
+# Terminal 1 — prediction API (http://localhost:8000/health)
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+```bash
+# Terminal 2 — dashboard (connects to the API when it is running)
+streamlit run dashboard/app.py
+```
+
+```bash
+# Terminal 3 — MLflow UI (http://127.0.0.1:5000), no Docker needed
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+```bash
+# Anytime checks
+python src/monitoring/monitor.py   # writes logs/monitoring_report.json
+python -m pytest tests/ -q         # expect: 21 passed
+```
+
 ## Part 1: Data Engineering Pipeline
 
 Execute the Part 1 data stages in sequence:
