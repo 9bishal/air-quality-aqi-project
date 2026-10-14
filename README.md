@@ -210,6 +210,8 @@ streamlit run dashboard/app.py
 ```bash
 # Terminal 3 — MLflow UI (http://127.0.0.1:5000), no Docker needed
 mlflow ui --backend-store-uri sqlite:///mlflow.db
+# Tip: start this BEFORE training to watch runs appear live —
+# the UI reads mlflow.db while training writes to it (refresh the page).
 ```
 
 ```bash
