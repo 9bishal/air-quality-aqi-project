@@ -1,0 +1,17 @@
+# Never bake secrets or local state into the image
+.env
+.env.*
+*.pem
+*.key
+.git/
+venv/
+.venv/
+__pycache__/
+*.pyc
+data/raw/
+mlruns/
+mlartifacts/
+mlflow.db
+airflow/
+logs/
+.DS_Store

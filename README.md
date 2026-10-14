@@ -256,17 +256,28 @@ used by the dashboard.
 
 ## Part 2
 
-The second phase extends the pipeline with AQI prediction (implemented):
+The second phase extends the pipeline with 24h-ahead AQI prediction (implemented
+and verified 2026-10-14, 21/21 tests passing):
 
-- AQI prediction (next-observation AQI value + category)
-- Machine-learning models (LinearRegression / RandomForest + comparison)
-- Feature engineering (`src/features/build_features.py`: lag 1/2/3, rolling 3/7, calendar)
-- MLflow experiment tracking (`sqlite:///mlflow.db`, experiment `aqi_prediction`)
-- Model registry (`aqi_regressor`, `aqi_classifier` + `models/model_metadata.json`)
-- FastAPI (`api/main.py`: `GET /health`, `GET /model-info`, `POST /predict`)
-- Docker (`Dockerfile`: `docker build -t aqi-api . && docker run -p 8000:8000 aqi-api`)
-- Model monitoring (`src/monitoring/monitor.py` → `logs/monitoring_report.json`)
-- Retraining strategy (`docs/model_lifecycle.md`)
+- Target: AQI at T+24h (±2h, UTC, per station); missing windows dropped and
+  counted, never substituted (`src/features/build_features.py`)
+- Features: gap-aware lags/rolling (past-only), UTC calendar, generalised
+  grid `lat_gen/lon_gen` (~11km; `station_id` not a feature)
+- Data: 1624 gold rows → 609 ML rows (809 missing +24h window); weather
+  omitted (Open-Meteo 2026 does not overlap OpenAQ 2016-2025)
+- Models: Dummy/Linear/RF regressors + Dummy/Logistic/RF classifiers,
+  chronological 70/15/15 split, val-selected (RF-reg val RMSE 47.5,
+  LR-clf val F1 0.72); test shows regime-shift degradation (honest limitation)
+- MLflow (`sqlite:///mlflow.db`, experiment `aqi_prediction`; registry
+  `aqi_regressor`/`aqi_classifier` v2 READY) — `mlflow ui --backend-store-uri sqlite:///mlflow.db`
+- FastAPI (`api/main.py`: `GET /health`, `GET /model-info`, `POST /predict`,
+  horizon `+24h` in responses) — `uvicorn api.main:app --host 0.0.0.0 --port 8000`
+- Docker (`Dockerfile` + `HEALTHCHECK /health`; run `python3 src/models/train.py`
+  first since `models/` is git-ignored): `docker build -t aqi-api . && docker run -p 8000:8000 aqi-api`
+  (build/run not executed here — daemon unavailable)
+- Monitoring (`src/monitoring/monitor.py` → `logs/monitoring_report.json`;
+  holdout proxy labelled, not live) + retraining rules (`docs/model_lifecycle.md`)
+- Dashboard Part-2 section prefers FastAPI, labels horizon/versions/limitations
 
 ```bash
 python3 src/features/build_features.py
@@ -288,3 +299,4 @@ Bishal Kumar Shah
 ```
 
 ```
+Verify on GitHub with git show --stat HEAD or git log origin/main -1 --stat.

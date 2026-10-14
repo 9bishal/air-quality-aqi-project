@@ -293,18 +293,24 @@ st.dataframe(
 )
 
 
-# Part 2 — AQI prediction (uses registered models; same artifacts as FastAPI)
-st.subheader("AQI Prediction (Part 2)")
+# Part 2 — 24h-ahead AQI prediction (same schema as FastAPI POST /predict).
+# Prefers the live FastAPI endpoint; falls back to local joblib artifacts.
+st.subheader("AQI Prediction — 24h ahead (Part 2)")
+st.caption(
+    "Historical charts above show observed AQI. Predictions below are "
+    "model forecasts for approximately 24h after the given observation "
+    "(UTC, per grid cell). Location uses a generalised ~11km grid cell "
+    "(lat_gen/lon_gen), never exact coordinates."
+)
 try:
-    import joblib as _joblib
-
-    _reg = _joblib.load("models/best_regressor.joblib")
-    _clf = _joblib.load("models/best_classifier.joblib")
-
+    _pred = None
+    _via = None
+    _versions = {}
     with st.form("aqi_predict_form"):
         c1, c2, c3 = st.columns(3)
         with c1:
-            p_station = st.number_input("Station ID", value=int(df["station_id"].iloc[0]))
+            p_lat = st.number_input("Grid lat_gen", min_value=-90.0, max_value=90.0, value=13.0, step=0.1)
+            p_lon = st.number_input("Grid lon_gen", min_value=-180.0, max_value=180.0, value=77.5, step=0.1)
             p_aqi = st.number_input("Current AQI", min_value=0.0, max_value=1000.0, value=float(round(df["aqi"].mean(), 1)))
             p_lag1 = st.number_input("AQI lag 1", min_value=0.0, max_value=1000.0, value=float(round(df["aqi"].mean(), 1)))
             p_lag2 = st.number_input("AQI lag 2", min_value=0.0, max_value=1000.0, value=float(round(df["aqi"].mean(), 1)))
@@ -316,25 +322,43 @@ try:
         with c3:
             p_rx7 = st.number_input("Rolling max 7", value=float(round(df["aqi"].max(), 1)))
             p_diff = st.number_input("AQI diff 1", value=0.0)
-            p_hour = st.number_input("Hour (0-23)", min_value=0, max_value=23, value=10)
+            p_hour = st.number_input("Hour (0-23 UTC)", min_value=0, max_value=23, value=10)
             p_dow = st.number_input("Day of week (0-6)", min_value=0, max_value=6, value=1)
             p_month = st.number_input("Month (1-12)", min_value=1, max_value=12, value=3)
-        submitted = st.form_submit_button("Predict next AQI")
+        submitted = st.form_submit_button("Predict AQI +24h")
 
     if submitted:
-        _row = pd.DataFrame([[
-            p_station, p_aqi, p_lag1, p_lag2, p_lag3, p_rm3, p_rs3,
-            p_rm7, p_rx7, p_diff, p_hour, p_dow, p_month,
-        ]], columns=[
-            "station_id", "aqi", "aqi_lag1", "aqi_lag2", "aqi_lag3",
-            "aqi_roll_mean_3", "aqi_roll_std_3", "aqi_roll_mean_7",
-            "aqi_roll_max_7", "aqi_diff_1", "hour", "dayofweek", "month",
-        ])
-        pred_aqi = float(_reg.predict(_row)[0])
-        pred_cat = str(_clf.predict(_row)[0])
-        st.success(f"Predicted next AQI: {pred_aqi:.1f} — category: {pred_cat}")
-        st.caption("Same artifacts served by the FastAPI service (`POST /predict`). "
-                   "Start it with `uvicorn api.main:app --port 8000` or `docker run -p 8000:8000 aqi-api`.")
+        _payload = {
+            "lat_gen": p_lat, "lon_gen": p_lon, "aqi": p_aqi,
+            "aqi_lag1": p_lag1, "aqi_lag2": p_lag2, "aqi_lag3": p_lag3,
+            "aqi_roll_mean_3": p_rm3, "aqi_roll_std_3": p_rs3,
+            "aqi_roll_mean_7": p_rm7, "aqi_roll_max_7": p_rx7,
+            "aqi_diff_1": p_diff, "hour": p_hour,
+            "dayofweek": p_dow, "month": p_month,
+        }
+        try:  # prefer FastAPI when it is running
+            import requests as _requests
+            _r = _requests.post("http://localhost:8000/predict", json=_payload, timeout=10)
+            _r.raise_for_status()
+            _pred = _r.json()
+            _via = "FastAPI POST /predict"
+            _versions = {"reg": _pred.get("model_regressor"), "clf": _pred.get("model_classifier")}
+        except Exception:
+            import joblib as _joblib
+            _cols = ["lat_gen", "lon_gen", "aqi", "aqi_lag1", "aqi_lag2", "aqi_lag3",
+                     "aqi_roll_mean_3", "aqi_roll_std_3", "aqi_roll_mean_7",
+                     "aqi_roll_max_7", "aqi_diff_1", "hour", "dayofweek", "month"]
+            _row = pd.DataFrame([[_payload[c] for c in _cols]], columns=_cols)
+            _reg = _joblib.load("models/best_regressor.joblib")
+            _clf = _joblib.load("models/best_classifier.joblib")
+            _pred = {"predicted_aqi": float(_reg.predict(_row)[0]),
+                     "predicted_category": str(_clf.predict(_row)[0]),
+                     "horizon": "+24h"}
+            _via = "local joblib fallback (FastAPI unavailable)"
+    if submitted and _pred is not None:
+        st.success(f"Predicted AQI (+24h): {_pred['predicted_aqi']:.1f} — category: {_pred['predicted_category']} (via {_via})")
+        st.caption("Same schema as training (T+24h ±2h UTC). Start API: `uvicorn api.main:app --port 8000` or `docker run -p 8000:8000 aqi-api`.")
+        st.warning("Limitation: trained on 609 sparse 2016-2021 samples; test shows regime-shift degradation (see docs/model_lifecycle.md). Weather features unavailable (no historic overlap).", icon="⚠️")
 except FileNotFoundError:
     st.info("Prediction models not trained yet — run `python3 src/models/train.py`.")
 except Exception as exc:

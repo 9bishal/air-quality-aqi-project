@@ -67,7 +67,8 @@ dmypy.json
 *.hdf5
 *.joblib
 *.onnx
-/models/
+/models/*
+!/models/.gitkeep
 /mlruns/
 /mlartifacts/
 /checkpoints/

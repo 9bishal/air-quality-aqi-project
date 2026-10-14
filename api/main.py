@@ -1,7 +1,10 @@
-"""FastAPI inference service for AQI prediction (Part 2).
+"""FastAPI inference service for 24h-ahead AQI prediction (Part 2).
 
-Serves the best regression (next-AQI value) and classification
-(next-AQI category) models trained by src/models/train.py.
+Serves the best regression (AQI value @T+24h) and classification
+(AQI category @T+24h) models trained by src/models/train.py.
+
+Feature schema is imported from src.features.build_features (single
+source of truth) -- no second feature implementation lives here.
 
 Run:
     uvicorn api.main:app --host 0.0.0.0 --port 8000
@@ -10,6 +13,7 @@ Run:
 from __future__ import annotations
 
 import json
+import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,24 +24,19 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.features.build_features import (  # noqa: E402  single source of truth
+    FEATURE_COLUMNS,
+    TARGET_HORIZON_HOURS,
+)
+
 MODELS_DIR = PROJECT_ROOT / "models"
 METADATA_FILE = MODELS_DIR / "model_metadata.json"
 
-FEATURE_COLUMNS = [
-    "station_id",
-    "aqi",
-    "aqi_lag1",
-    "aqi_lag2",
-    "aqi_lag3",
-    "aqi_roll_mean_3",
-    "aqi_roll_std_3",
-    "aqi_roll_mean_7",
-    "aqi_roll_max_7",
-    "aqi_diff_1",
-    "hour",
-    "dayofweek",
-    "month",
-]
+AQI_MIN, AQI_MAX = 0.0, 1000.0
+CATEGORIES = {"Good", "Satisfactory", "Moderate", "Poor", "Very Poor", "Severe"}
 
 
 def get_aqi_category(aqi: float) -> str:
@@ -55,11 +54,13 @@ def get_aqi_category(aqi: float) -> str:
 
 
 class PredictionRequest(BaseModel):
-    station_id: float = Field(examples=[412])
-    aqi: float = Field(ge=0, le=1000, examples=[62.0])
-    aqi_lag1: float = Field(ge=0, le=1000, examples=[58.0])
-    aqi_lag2: float = Field(ge=0, le=1000, examples=[55.0])
-    aqi_lag3: float = Field(ge=0, le=1000, examples=[60.0])
+    # Generalised grid cell (~11km), NOT exact coords / station_id.
+    lat_gen: float = Field(ge=-90, le=90, examples=[13.0])
+    lon_gen: float = Field(ge=-180, le=180, examples=[77.5])
+    aqi: float = Field(ge=AQI_MIN, le=AQI_MAX, examples=[62.0])
+    aqi_lag1: float = Field(ge=AQI_MIN, le=AQI_MAX, examples=[58.0])
+    aqi_lag2: float = Field(ge=AQI_MIN, le=AQI_MAX, examples=[55.0])
+    aqi_lag3: float = Field(ge=AQI_MIN, le=AQI_MAX, examples=[60.0])
     aqi_roll_mean_3: float = Field(examples=[57.0])
     aqi_roll_std_3: float = Field(ge=0, examples=[2.5])
     aqi_roll_mean_7: float = Field(examples=[59.0])
@@ -74,6 +75,9 @@ class PredictionResponse(BaseModel):
     predicted_aqi: float
     regressed_category: str
     predicted_category: str
+    horizon: str
+    model_regressor: str | None
+    model_classifier: str | None
     latency_ms: float
 
 
@@ -83,7 +87,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="AQI Prediction API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="AQI Prediction API", version="2.0.0", lifespan=lifespan)
 
 _regressor = None
 _classifier = None
@@ -94,10 +98,12 @@ def _load_artifacts() -> None:
     global _regressor, _classifier, _metadata
     reg_path = MODELS_DIR / "best_regressor.joblib"
     clf_path = MODELS_DIR / "best_classifier.joblib"
-    if not reg_path.exists() or not clf_path.exists():
+    missing = [p.name for p in (reg_path, clf_path) if not p.exists()]
+    if missing:
         raise FileNotFoundError(
-            f"Model artifacts not found in {MODELS_DIR}. "
-            "Run `python3 src/models/train.py` first."
+            f"Model artifacts missing in {MODELS_DIR}: {missing}. "
+            "Run `python3 src/models/train.py` first (models/ is git-ignored "
+            "and must be built before serving)."
         )
     _regressor = joblib.load(reg_path)
     _classifier = joblib.load(clf_path)
@@ -112,39 +118,57 @@ def _ensure_loaded() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    _ensure_loaded()
+    try:
+        _ensure_loaded()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"status": "ok"}
 
 
 @app.get("/model-info")
 def model_info() -> dict:
-    _ensure_loaded()
+    try:
+        _ensure_loaded()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
+        "target": f"AQI @T+{TARGET_HORIZON_HOURS}h (+/-2h, UTC, per station)",
         "best_regressor": _metadata.get("best_regressor"),
         "best_classifier": _metadata.get("best_classifier"),
+        "model_versions": _metadata.get("model_versions", {}),
         "feature_columns": FEATURE_COLUMNS,
-        "results": _metadata.get("results", {}),
         "trained_at": _metadata.get("trained_at"),
+        "split": _metadata.get("split", {}),
     }
 
 
 @app.post("/predict", response_model=PredictionResponse)
 def predict(payload: PredictionRequest) -> PredictionResponse:
-    _ensure_loaded()
-    start = time.perf_counter()
     try:
-        row = pd.DataFrame([[getattr(payload, c) for c in FEATURE_COLUMNS]],
-                           columns=FEATURE_COLUMNS)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _ensure_loaded()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    start = time.perf_counter()
+    row = pd.DataFrame(
+        [[getattr(payload, c) for c in FEATURE_COLUMNS]],
+        columns=FEATURE_COLUMNS,
+    )
     if row.isna().any().any():
         raise HTTPException(status_code=422, detail="Missing feature values.")
     predicted_aqi = float(_regressor.predict(row)[0])
+    if not (AQI_MIN - 1e-6 <= predicted_aqi <= AQI_MAX + 500):
+        raise HTTPException(status_code=500, detail="Model returned invalid AQI.")
+    predicted_aqi = max(AQI_MIN, predicted_aqi)  # clip small negatives to 0
     predicted_category = str(_classifier.predict(row)[0])
+    if predicted_category not in CATEGORIES:
+        raise HTTPException(status_code=500, detail="Model returned invalid category.")
     latency_ms = (time.perf_counter() - start) * 1000.0
     return PredictionResponse(
         predicted_aqi=round(predicted_aqi, 2),
         regressed_category=get_aqi_category(predicted_aqi),
         predicted_category=predicted_category,
+        horizon=f"+{TARGET_HORIZON_HOURS}h",
+        model_regressor=_metadata.get("best_regressor"),
+        model_classifier=_metadata.get("best_classifier"),
         latency_ms=round(latency_ms, 2),
     )
