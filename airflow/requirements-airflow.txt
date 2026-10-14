@@ -1,0 +1,13 @@
+# Core pipeline dependencies for Airflow DAG tasks:
+# 1. API collection (OpenAQ, Open-Meteo)
+# 2. Cleaning & preprocessing
+# 3. Quality checks & validation
+# 4. Join & Indian CPCB AQI calculation
+# 5. PostgreSQL database loading
+
+pandas
+numpy
+requests
+python-dotenv
+sqlalchemy
+psycopg2-binary
