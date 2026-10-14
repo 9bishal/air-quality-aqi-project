@@ -133,6 +133,7 @@ Pipfile.lock
 ehthumbs.db
 Thumbs.db
 Desktop.ini
+install-pyenv-win.ps1
 
 # ── Optional: uncomment to hide assignment spec from public repo ──
 # assignment.md
