@@ -473,15 +473,25 @@ Invoke-RestMethod -Uri http://localhost:8000/predict `
 
 ## Run with Docker (Cross-Platform)
 
-The inference service is fully containerized. Because `models/` is git-ignored, ensure models are trained locally first (`python src/models/train.py`).
+The entire application stack (PostgreSQL, Airflow, and FastAPI Inference Service) is orchestrated via Docker Compose.
 
-### 1. Build the Docker Image
+### 1. Run the Entire Stack (FastAPI + Airflow + PostgreSQL)
 ```bash
-docker build -t aqi-api .
+docker compose up -d
+```
+This starts:
+- **FastAPI Inference Service** (`aqi_api`): Port `8000` (Healthcheck: `http://localhost:8000/health`)
+- **Apache Airflow Standalone** (`aqi_airflow`): Port `8080` (`http://localhost:8080`)
+- **PostgreSQL Database** (`aqi_postgres`): Port `5432`
+
+### 2. Run Only the FastAPI Service via Docker Compose
+```bash
+docker compose up -d api
 ```
 
-### 2. Run the Container
+### 3. Build & Run FastAPI Container Standalone (without Compose)
 ```bash
+docker build -t aqi-api .
 docker run -d --name aqi-api -p 8000:8000 aqi-api
 ```
 
