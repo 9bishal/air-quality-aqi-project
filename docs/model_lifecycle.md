@@ -77,8 +77,9 @@ Recommended next data: continuous CPCB hourly history for Bengaluru (or
   `python3 src/models/train.py` first since `models/` is git-ignored
   (placeholder `models/.gitkeep` keeps `COPY` working on fresh clones):
   `docker build -t aqi-api . && docker run -p 8000:8000 aqi-api`.
-  Docker build/run **not executed** here (daemon unavailable) — reported,
-  not claimed.
+  Step-by-step commands including Windows/PowerShell are in
+  `README.md` ("Run with Docker (Windows)"). Docker build/run was not
+  executed in this environment (daemon unavailable) — reported, not claimed.
 - Streamlit (`dashboard/app.py`, "AQI Prediction — 24h ahead") prefers
   `POST localhost:8000/predict`, falls back to local joblib, and labels
   horizon, grid cell, model versions, and limitations distinctly from

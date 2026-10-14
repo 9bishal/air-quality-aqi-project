@@ -130,6 +130,13 @@ Activate the environment.
 source venv/bin/activate
 ```
 
+### Windows (PowerShell)
+
+```powershell
+py -m venv venv
+.\venv\Scripts\Activate.ps1
+```
+
 Install dependencies:
 
 ```bash
@@ -272,9 +279,10 @@ and verified 2026-10-14, 21/21 tests passing):
   `aqi_regressor`/`aqi_classifier` v2 READY) — `mlflow ui --backend-store-uri sqlite:///mlflow.db`
 - FastAPI (`api/main.py`: `GET /health`, `GET /model-info`, `POST /predict`,
   horizon `+24h` in responses) — `uvicorn api.main:app --host 0.0.0.0 --port 8000`
-- Docker (`Dockerfile` + `HEALTHCHECK /health`; run `python3 src/models/train.py`
-  first since `models/` is git-ignored): `docker build -t aqi-api . && docker run -p 8000:8000 aqi-api`
-  (build/run not executed here — daemon unavailable)
+- Docker — see **Run with Docker (Windows)** below. Short version: run
+  `python src/models/train.py` first (models/ is git-ignored and must exist
+  before the image is built), then `docker build -t aqi-api .` and
+  `docker run -p 8000:8000 aqi-api`.
 - Monitoring (`src/monitoring/monitor.py` → `logs/monitoring_report.json`;
   holdout proxy labelled, not live) + retraining rules (`docs/model_lifecycle.md`)
 - Dashboard Part-2 section prefers FastAPI, labels horizon/versions/limitations
@@ -286,6 +294,73 @@ python3 src/monitoring/monitor.py
 uvicorn api.main:app --host 0.0.0.0 --port 8000
 python3 -m pytest tests/ -q
 ```
+
+## Run with Docker (Windows)
+
+Prerequisites: [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
+(WSL 2 backend enabled), Python 3.10+, Git. All commands in PowerShell
+from the project root.
+
+```powershell
+# 1. Clone and enter the project
+git clone https://github.com/9bishal/air-quality-aqi-project.git
+cd air-quality-aqi-project
+
+# 2. (Build models first — models/ is git-ignored, so the image
+#     needs these files to exist before `docker build`)
+py -m venv venv; .\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python src/features/build_features.py
+python src/models/train.py
+
+# 3. Build the image (run once; rebuild after retraining)
+docker build -t aqi-api .
+
+# 4. Run the API on port 8000
+docker run -d --name aqi-api -p 8000:8000 aqi-api
+
+# 5. Check health (expect {"status":"ok"})
+curl.exe http://localhost:8000/health
+
+# 6. Check loaded models and 24h target
+curl.exe http://localhost:8000/model-info
+```
+
+Predict AQI +24h (PowerShell). Note: use `curl.exe`, not bare `curl`
+(PowerShell aliases `curl` to `Invoke-WebRequest`):
+
+```powershell
+$body = @{
+  lat_gen = 13.0; lon_gen = 77.5; aqi = 62.0
+  aqi_lag1 = 58.0; aqi_lag2 = 55.0; aqi_lag3 = 60.0
+  aqi_roll_mean_3 = 57.0; aqi_roll_std_3 = 2.5
+  aqi_roll_mean_7 = 59.0; aqi_roll_max_7 = 70.0
+  aqi_diff_1 = 4.0; hour = 10; dayofweek = 1; month = 3
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri http://localhost:8000/predict `
+  -Method Post -ContentType "application/json" -Body $body
+# Expect: predicted_aqi, predicted_category, horizon "+24h", model names
+```
+
+Stop / restart / remove:
+
+```powershell
+docker stop aqi-api
+docker start aqi-api
+docker rm -f aqi-api
+docker images | Select-String "aqi-api"
+```
+
+Troubleshooting:
+
+| Symptom | Fix |
+|---|---|
+| `COPY models/ ... not found` at build | Run step 2 first (`python src/models/train.py`) |
+| `/health` returns 503 | Container started without model files — rebuild after step 2 |
+| `port is already allocated` | `docker stop aqi-api`, or use `-p 8001:8000` and call `localhost:8001` |
+| `curl` gives odd errors in PowerShell | Use `curl.exe` (with `.exe`) |
+| Dashboard can't reach API | Start the container first; the dashboard falls back to local joblib files otherwise |
 
 ## Project Status
 
