@@ -302,11 +302,10 @@ Run Airflow and its PostgreSQL backend via Docker Compose:
    ```
 
 4. **Access the Airflow Web UI**:
-   - Open [http://localhost:8080](http://localhost:8080)
-   - To retrieve the auto-generated standalone admin password:
-     ```bash
-     docker exec -it aqi_airflow cat /opt/airflow/standalone_admin_password.txt
-     ```
+   - Open [http://localhost:8080](http://localhost:8080) in your browser.
+   - **Username**: `admin`
+   - **Password**: `admin`
+   *(Or reset anytime via: `docker exec aqi_airflow airflow users reset-password --username admin --password admin`)*
 
 5. **Stop Airflow Containers**:
    ```bash
