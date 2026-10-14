@@ -97,5 +97,20 @@ streamlit run dashboard/app.py
 ## 8. Tests
 
 ```bash
-pytest tests/test_pipeline.py -v
+pytest -v
 ```
+* 26 passed across `test_pipeline.py`, `test_ml.py`, and `test_orchestrator.py`.
+
+## 9. Master Single-Command Pipeline
+
+```bash
+# Incremental sync + retraining
+python run_full_pipeline.py
+
+# Dry run
+python run_full_pipeline.py --dry-run
+
+# Historical backfill
+python run_full_pipeline.py --start 2026-09-01 --end 2026-10-14
+```
+Detailed report in `reports/full_pipeline_orchestration.md`.

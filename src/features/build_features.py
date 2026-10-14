@@ -55,6 +55,7 @@ FEATURE_COLUMNS = [
     "aqi_lag1",
     "aqi_lag2",
     "aqi_lag3",
+    "aqi_lag24",
     "aqi_roll_mean_3",
     "aqi_roll_std_3",
     "aqi_roll_mean_7",
@@ -63,6 +64,10 @@ FEATURE_COLUMNS = [
     "hour",
     "dayofweek",
     "month",
+    "hour_sin",
+    "hour_cos",
+    "dayofweek_sin",
+    "dayofweek_cos",
 ]
 
 TARGET_REGRESSION = "next_aqi"
@@ -88,6 +93,11 @@ STATION_COORDS_FALLBACK = {
     5574: (12.9756843, 77.5660749),
     5607: (13.0270199, 77.494094),
     5644: (12.990328, 77.5431385),
+    6973: (12.920984, 77.584908),
+    6974: (12.951913, 77.539784),
+    6975: (12.917348, 77.622813),
+    6983: (12.938539, 77.5901),
+    6984: (13.029152, 77.585901),
 }
 
 
@@ -156,11 +166,19 @@ def load_gold(path: Path = GOLD_FILE) -> pd.DataFrame:
     return df
 
 
+import numpy as np
+
+
 def add_calendar(df: pd.DataFrame) -> pd.DataFrame:
     ts = pd.to_datetime(df["timestamp"], utc=True)
     df["hour"] = ts.dt.hour
     df["dayofweek"] = ts.dt.dayofweek
     df["month"] = ts.dt.month
+    # Cyclical representations for periodic time features
+    df["hour_sin"] = np.sin(2.0 * np.pi * df["hour"] / 24.0)
+    df["hour_cos"] = np.cos(2.0 * np.pi * df["hour"] / 24.0)
+    df["dayofweek_sin"] = np.sin(2.0 * np.pi * df["dayofweek"] / 7.0)
+    df["dayofweek_cos"] = np.cos(2.0 * np.pi * df["dayofweek"] / 7.0)
     return df
 
 
@@ -201,6 +219,21 @@ def add_lag_rolling(group: pd.DataFrame) -> pd.DataFrame:
         gap_h = (group["timestamp"] - src_ts).dt.total_seconds() / 3600.0
         # Stale source -> unusable at prediction time.
         group.loc[gap_h > LAG_MAX_AGE_HOURS, f"aqi_lag{lag}"] = float("nan")
+
+    # aqi_lag24: past observation at approximately T - 24h (+/- 2h) within the same station
+    lookup = group.set_index("timestamp")["aqi"]
+    lag24_horizon = pd.Timedelta(hours=24)
+    lag24_tol = pd.Timedelta(hours=TARGET_TOLERANCE_HOURS)
+    lag24_vals = []
+    for ts in group["timestamp"]:
+        window = lookup.loc[ts - lag24_horizon - lag24_tol : ts - lag24_horizon + lag24_tol]
+        if len(window) == 0:
+            lag24_vals.append(float("nan"))
+        else:
+            nearest = min(window.index, key=lambda t: abs((ts - t) - lag24_horizon))
+            lag24_vals.append(float(window.loc[nearest]))
+    group["aqi_lag24"] = lag24_vals
+
     shifted = group["aqi"].shift(1)
     group["aqi_roll_mean_3"] = shifted.rolling(3, min_periods=3).mean()
     group["aqi_roll_std_3"] = shifted.rolling(3, min_periods=3).std().fillna(0.0)
@@ -235,7 +268,7 @@ def build_features(
         base = add_calendar(base)
         base = base.sort_values(["station_id", "timestamp"]).reset_index(drop=True)
         for col in ("station_id", "timestamp", "aqi", "aqi_category", "city",
-                    "hour", "dayofweek", "month"):
+                    "hour", "dayofweek", "month", "hour_sin", "hour_cos", "dayofweek_sin", "dayofweek_cos"):
             if col not in df.columns and col in base.columns:
                 df[col] = base[col].values[: len(df)]
     n_no_target = int(df[TARGET_REGRESSION].isna().sum())
@@ -248,7 +281,7 @@ def build_features(
         base = add_calendar(base)
         base = base.sort_values(["station_id", "timestamp"]).reset_index(drop=True)
         for col in ("station_id", "timestamp", "aqi", "aqi_category", "city",
-                    "hour", "dayofweek", "month",
+                    "hour", "dayofweek", "month", "hour_sin", "hour_cos", "dayofweek_sin", "dayofweek_cos",
                     TARGET_REGRESSION, TARGET_CLASSIFICATION, TARGET_TIMESTAMP_COL):
             if col not in df.columns and col in base.columns:
                 df[col] = base[col].values[: len(df)]

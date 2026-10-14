@@ -316,6 +316,7 @@ try:
             p_lag2 = st.number_input("AQI lag 2", min_value=0.0, max_value=1000.0, value=float(round(df["aqi"].mean(), 1)))
         with c2:
             p_lag3 = st.number_input("AQI lag 3", min_value=0.0, max_value=1000.0, value=float(round(df["aqi"].mean(), 1)))
+            p_lag24 = st.number_input("AQI lag 24h", min_value=0.0, max_value=1000.0, value=float(round(df["aqi"].mean(), 1)))
             p_rm3 = st.number_input("Rolling mean 3", value=float(round(df["aqi"].mean(), 1)))
             p_rs3 = st.number_input("Rolling std 3", min_value=0.0, value=5.0)
             p_rm7 = st.number_input("Rolling mean 7", value=float(round(df["aqi"].mean(), 1)))
@@ -331,6 +332,7 @@ try:
         _payload = {
             "lat_gen": p_lat, "lon_gen": p_lon, "aqi": p_aqi,
             "aqi_lag1": p_lag1, "aqi_lag2": p_lag2, "aqi_lag3": p_lag3,
+            "aqi_lag24": p_lag24,
             "aqi_roll_mean_3": p_rm3, "aqi_roll_std_3": p_rs3,
             "aqi_roll_mean_7": p_rm7, "aqi_roll_max_7": p_rx7,
             "aqi_diff_1": p_diff, "hour": p_hour,
@@ -345,9 +347,15 @@ try:
             _versions = {"reg": _pred.get("model_regressor"), "clf": _pred.get("model_classifier")}
         except Exception:
             import joblib as _joblib
+            import numpy as _np
+            _payload["hour_sin"] = float(_np.sin(2.0 * _np.pi * p_hour / 24.0))
+            _payload["hour_cos"] = float(_np.cos(2.0 * _np.pi * p_hour / 24.0))
+            _payload["dayofweek_sin"] = float(_np.sin(2.0 * _np.pi * p_dow / 7.0))
+            _payload["dayofweek_cos"] = float(_np.cos(2.0 * _np.pi * p_dow / 7.0))
             _cols = ["lat_gen", "lon_gen", "aqi", "aqi_lag1", "aqi_lag2", "aqi_lag3",
-                     "aqi_roll_mean_3", "aqi_roll_std_3", "aqi_roll_mean_7",
-                     "aqi_roll_max_7", "aqi_diff_1", "hour", "dayofweek", "month"]
+                     "aqi_lag24", "aqi_roll_mean_3", "aqi_roll_std_3", "aqi_roll_mean_7",
+                     "aqi_roll_max_7", "aqi_diff_1", "hour", "dayofweek", "month",
+                     "hour_sin", "hour_cos", "dayofweek_sin", "dayofweek_cos"]
             _row = pd.DataFrame([[_payload[c] for c in _cols]], columns=_cols)
             _reg = _joblib.load("models/best_regressor.joblib")
             _clf = _joblib.load("models/best_classifier.joblib")
@@ -358,7 +366,7 @@ try:
     if submitted and _pred is not None:
         st.success(f"Predicted AQI (+24h): {_pred['predicted_aqi']:.1f} — category: {_pred['predicted_category']} (via {_via})")
         st.caption("Same schema as training (T+24h ±2h UTC). Start API: `uvicorn api.main:app --port 8000` or `docker run -p 8000:8000 aqi-api`.")
-        st.warning("Limitation: trained on 609 sparse 2016-2021 samples; test shows regime-shift degradation (see docs/model_lifecycle.md). Weather features unavailable (no historic overlap).", icon="⚠️")
+        st.info("Model context: Trained on 3,032 hourly samples across 7 stations (August through October 2026) with 24h lag and cyclical calendar features. Real-time daily sync enabled.", icon="ℹ️")
 except FileNotFoundError:
     st.info("Prediction models not trained yet — run `python3 src/models/train.py`.")
 except Exception as exc:

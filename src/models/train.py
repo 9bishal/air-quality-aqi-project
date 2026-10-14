@@ -20,8 +20,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import joblib
 import pandas as pd
 from sklearn.dummy import DummyClassifier, DummyRegressor
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.linear_model import LinearRegression, LogisticRegression
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    GradientBoostingRegressor,
+    HistGradientBoostingClassifier,
+    HistGradientBoostingRegressor,
+    RandomForestClassifier,
+    RandomForestRegressor,
+)
+from sklearn.linear_model import LinearRegression, LogisticRegression, Ridge, RidgeClassifier
 from sklearn.metrics import (
     accuracy_score,
     confusion_matrix,
@@ -59,7 +66,11 @@ EXPERIMENT_NAME = "aqi_prediction"
 
 def _log_sklearn_model(model, name, registered_model_name=None):
     """MLflow 3.x uses skops for sklearn models; trust tree types we trained."""
-    kwargs = {"skops_trusted_types": ["sklearn.tree._tree.Tree"]}
+    trusted = [
+        "sklearn.tree._tree.Tree",
+        "sklearn.ensemble._hist_gradient_boosting.predictor.TreePredictor",
+    ]
+    kwargs = {"skops_trusted_types": trusted}
     if registered_model_name:
         kwargs["registered_model_name"] = registered_model_name
     mlflow.sklearn.log_model(model, name=name, **kwargs)
@@ -155,8 +166,20 @@ def train() -> dict:
     regressors = {
         "dummy_mean": DummyRegressor(strategy="mean"),
         "linear_regression": make_pipeline(StandardScaler(), LinearRegression()),
+        "ridge_alpha_1": make_pipeline(StandardScaler(), Ridge(alpha=1.0, random_state=42)),
+        "ridge_alpha_10": make_pipeline(StandardScaler(), Ridge(alpha=10.0, random_state=42)),
+        "ridge_alpha_100": make_pipeline(StandardScaler(), Ridge(alpha=100.0, random_state=42)),
         "random_forest_regressor": RandomForestRegressor(
             n_estimators=200, random_state=42, n_jobs=-1
+        ),
+        "random_forest_regressor_depth10": RandomForestRegressor(
+            n_estimators=200, max_depth=10, min_samples_leaf=4, random_state=42, n_jobs=-1
+        ),
+        "hist_gradient_boosting_regressor": HistGradientBoostingRegressor(
+            max_iter=100, learning_rate=0.05, max_depth=5, min_samples_leaf=20, random_state=42
+        ),
+        "gradient_boosting_regressor": GradientBoostingRegressor(
+            n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42
         ),
     }
     classifiers = {
@@ -164,8 +187,17 @@ def train() -> dict:
         "logistic_regression": make_pipeline(
             StandardScaler(), LogisticRegression(max_iter=1000, class_weight="balanced")
         ),
+        "ridge_classifier": make_pipeline(
+            StandardScaler(), RidgeClassifier(alpha=10.0, class_weight="balanced", random_state=42)
+        ),
         "random_forest_classifier": RandomForestClassifier(
             n_estimators=200, random_state=42, n_jobs=-1, class_weight="balanced"
+        ),
+        "random_forest_classifier_depth10": RandomForestClassifier(
+            n_estimators=200, max_depth=10, min_samples_leaf=4, random_state=42, n_jobs=-1, class_weight="balanced"
+        ),
+        "hist_gradient_boosting_classifier": HistGradientBoostingClassifier(
+            max_iter=100, learning_rate=0.05, max_depth=5, min_samples_leaf=20, class_weight="balanced", random_state=42
         ),
     }
 

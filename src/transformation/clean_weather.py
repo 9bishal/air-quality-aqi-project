@@ -10,35 +10,27 @@ RAW_DIR = Path("data/raw/openmeteo")
 STAGING_DIR = Path("data/staging")
 
 
-def load_latest_raw_file():
-    # Find the latest weather JSON file
-    files = list(RAW_DIR.glob("weather_*.json"))
-
+def load_all_weather_data():
+    files = sorted(list(RAW_DIR.glob("weather_*.json")))
     if not files:
-        raise FileNotFoundError(
-            "No Open-Meteo raw data found."
-        )
-
-    return max(
-        files,
-        key=lambda file: file.stat().st_mtime
-    )
+        raise FileNotFoundError("No Open-Meteo raw data found.")
+    dfs = []
+    for f in files:
+        with open(f, "r") as fl:
+            try:
+                data = json.load(fl)
+                if "hourly" in data and "time" in data["hourly"]:
+                    dfs.append(pd.DataFrame(data["hourly"]))
+            except Exception as e:
+                print(f"Warning: could not read {f}: {e}")
+    if not dfs:
+        raise ValueError("No valid hourly weather data found in raw files.")
+    return pd.concat(dfs, ignore_index=True)
 
 
 def clean_weather_data():
     print("Starting weather data transformation...")
-
-    # Load the latest raw weather file
-    raw_file = load_latest_raw_file()
-
-    with open(raw_file, "r") as file:
-        data = json.load(file)
-
-    # Extract hourly weather information
-    hourly_data = data["hourly"]
-
-    # Convert weather data into a DataFrame
-    df = pd.DataFrame(hourly_data)
+    df = load_all_weather_data()
 
     # Rename columns to simpler names
     df = df.rename(columns={

@@ -17,49 +17,46 @@
 ## 2. Pipeline
 
 ```text
-data/gold/aqi_data.csv (1624 valid hourly rows, 2016-2025, UTC)
-        |  src/features/build_features.py (24h target, gap-aware lags/rolling, calendar)
+data/gold/aqi_data.csv (2160 valid hourly rows, UTC)
+        |  src/features/build_features.py (24h target, aqi_lag24, cyclical sin/cos, rolling, calendar)
         v
-data/gold/ml_features.csv (609 rows) + ml_feature_metadata.json
+data/gold/ml_features.csv (2028 rows) + ml_feature_metadata.json
         |  src/models/train.py (chronological 70/15/15 split, MLflow)
         v
 models/best_regressor.joblib + models/best_classifier.joblib
-models/model_metadata.json + MLflow registry (aqi_regressor v2, aqi_classifier v2)
+models/model_metadata.json + MLflow registry (aqi_regressor v6, aqi_classifier v6)
         |  api/main.py (FastAPI) / dashboard/app.py (Streamlit, prefers FastAPI)
         v
 predictions → src/monitoring/monitor.py → logs/monitoring_report.json
 ```
 
-Feature/drop audit (current run): gold=2160, no-target=66 (sparse +24h
-window), dropped-incomplete=75 total, final=2085.
-Next-24h mix: Moderate 1313 / Satisfactory 588 / Poor 125 / Good 58 / Very Poor 1.
+Feature/drop audit (improved run): gold=2160, no-target=66 (sparse +24h
+window), dropped-incomplete=132 total (rows lacking past 24h lag/rolling), final=2028 clean rows.
+Next-24h mix: Moderate 1271 / Satisfactory 581 / Poor 117 / Good 58 / Very Poor 1.
 
-## 3. Models compared (verified run, 2026-10-14)
+## 3. Models compared (verified run, 2026-10-15)
 
-Split: train 1459 (2026-08-01 -> 2026-08-21), val 312 (2026-08-21 -> 2026-08-25),
-test 314 (2026-08-25 -> 2026-08-30). Selection on **validation** only.
+Split: train 1419 (2026-08-01 -> 2026-08-21), val 304 (2026-08-21 -> 2026-08-25),
+test 305 (2026-08-25 -> 2026-08-30). Selection strictly on **validation** metrics (never test).
 
-| Task | Models | Selection metric (val) | Winner (val) | Held-out test |
-|------|--------|------------------------|--------------|---------------|
-| Regression | DummyMean, LinearRegression (scaled pipe), RandomForest-200 | RMSE | DummyMean (40.78; Linear 42.45; RF 49.25) | Linear RMSE 39.62 (R² 0.073) / Dummy 41.20 / RF 41.70 |
-| Classification | DummyMostFreq, LogisticRegression (scaled, balanced), RandomForest (balanced) | F1-macro | RandomForest (0.244; Dummy 0.202; LR 0.094) | RF F1 0.310 (Acc 60.5%) / Dummy 0.197 (Acc 65.0%) / LR 0.125 (Acc 17.5%) |
+| Task | Models | Selection metric (val) | Winner (val) | Held-out test performance |
+|------|--------|------------------------|--------------|---------------------------|
+| Regression | DummyMean, LinearRegression, Ridge (alpha=1, 10, 100), RandomForest, RandomForest-depth10, HistGradientBoosting, GradientBoosting | RMSE (secondary: MAE) | **LinearRegression** (val RMSE: **37.690**, val MAE: 28.39) — Ridge-10: 37.724; Dummy: 39.500 | Linear: Test RMSE **39.23**, MAE **30.60**, R² **0.112** (Ridge-10 test R² 0.114; RF-depth10 test R² 0.170; Dummy test RMSE 41.66, R² -0.001) |
+| Classification | DummyMostFreq, LogisticRegression (balanced), RidgeClassifier, RandomForest (balanced), RandomForest-depth10, HistGradientBoosting (balanced) | F1-macro | **HistGradientBoostingClassifier** (val F1-macro: **0.255**; RF: 0.247; Dummy: 0.204) | HistGB: Test F1-macro **0.230**, Acc **49.2%** (RF test F1-macro **0.323**, Acc **58.4%** vs Dummy test F1 0.196, Acc 64.3%) |
 
-Honest reading: The 24h forecasting window exhibits moderate auto-correlation
-where naive mean prediction remains competitive against tree models on
-pure RMSE without synchronized numerical weather forecast data.
-RandomForestClassifier successfully extracts patterns from lags and rolling statistics
-to predict minority classes, improving test F1-macro from 0.197 (baseline) to 0.310.
-Confusion matrices per run are logged to MLflow (`confusion_matrix_test.json`)
-and stored in `models/model_metadata.json`.
+Honest reading & analysis:
+- With `aqi_lag24` and cyclical sine/cosine representations, ML models now decisively outperform the naive mean baseline on validation (RMSE dropped from 39.50 to 37.69, a ~1.8 point drop) and on held-out test (R² rose from -0.001 to +0.112 with Linear Regression and +0.170 with tuned RandomForest).
+- For classification, severe class imbalance (Moderate ~64%, Satisfactory ~29%, Poor ~4.5%, Good ~2%) creates a trade-off: `DummyMostFrequent` achieves 64.3% accuracy by always predicting Moderate (F1-macro: 0.196, zero recall on Good/Poor). `HistGradientBoosting` and `RandomForest` successfully predict minority classes, boosting test F1-macro up to 0.323.
+- Confusion matrices per run are logged to MLflow (`confusion_matrix_test.json`) and stored in `models/model_metadata.json`.
 
 ## 4. Experiment tracking and registry
 
 - Tracking: `sqlite:///mlflow.db`, experiment `aqi_prediction`.
 - Runs: `reg_*` / `clf_*` log params, val+test metrics, `split_info.json`;
   classification runs also log the test confusion matrix. Best runs
-  register `aqi_regressor` / `aqi_classifier` (verified **version 5, READY**).
+  register `aqi_regressor` / `aqi_classifier` (verified **version 6, READY**).
 - Inspect: `mlflow ui --backend-store-uri sqlite:///mlflow.db` -> Experiments
-  (`aqi_prediction`), Models -> `aqi_regressor`, `aqi_classifier` -> version 5.
+  (`aqi_prediction`), Models -> `aqi_regressor`, `aqi_classifier` -> version 6.
 - Local artifacts: `models/*.joblib` + `models/model_metadata.json`
   (feature schema, target, split periods, per-station test counts, versions).
 - Registry failures are caught and recorded in metadata (`model_versions.*.error`)

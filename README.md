@@ -6,17 +6,18 @@ A complete end-to-end Data Engineering (Part 1) and MLOps (Part 2) solution for 
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
-2. [Architecture & Pipeline Flow](#architecture--pipeline-flow)
-3. [Technology Stack](#technology-stack)
-4. [Project Structure](#project-structure)
-5. [Installation & Setup (Cross-Platform)](#installation--setup-cross-platform)
-6. [Part 1: Data Engineering Pipeline](#part-1-data-engineering-pipeline)
-7. [Part 2: MLOps Pipeline (Features, Models, Registry, API, Docker, Monitoring)](#part-2-mlops-pipeline)
-8. [Run with Docker (Cross-Platform)](#run-with-docker-cross-platform)
-9. [Interactive Dashboard](#interactive-dashboard)
-10. [Automated Testing](#automated-testing)
-11. [Model Lifecycle & Monitoring Policy](#model-lifecycle--monitoring-policy)
-12. [Author & License](#author--license)
+2. [Single-Command Full Pipeline Orchestration](#single-command-full-pipeline-orchestration)
+3. [Architecture & Pipeline Flow](#architecture--pipeline-flow)
+4. [Technology Stack](#technology-stack)
+5. [Project Structure](#project-structure)
+6. [Installation & Setup (Cross-Platform)](#installation--setup-cross-platform)
+7. [Part 1: Data Engineering Pipeline](#part-1-data-engineering-pipeline)
+8. [Part 2: MLOps Pipeline (Features, Models, Registry, API, Docker, Monitoring)](#part-2-mlops-pipeline)
+9. [Run with Docker (Cross-Platform)](#run-with-docker-cross-platform)
+10. [Interactive Dashboard](#interactive-dashboard)
+11. [Automated Testing](#automated-testing)
+12. [Model Lifecycle & Monitoring Policy](#model-lifecycle--monitoring-policy)
+13. [Author & License](#author--license)
 
 ---
 
@@ -25,6 +26,32 @@ A complete end-to-end Data Engineering (Part 1) and MLOps (Part 2) solution for 
 This project provides:
 - **Data Engineering (Part 1)**: Automated API ingestion from OpenAQ (air quality) and Open-Meteo (meteorological parameters), data quality validation with rejected record logging, multi-layer transformations (raw → staging → cleaned → gold), PostgreSQL loading, and daily orchestration via Apache Airflow.
 - **MLOps Extension (Part 2)**: Reusable feature pipeline with strictly gap-aware lags, non-leaking rolling statistics, and generalized spatial grid features; chronological train/val/test evaluation comparing regression and classification models against naive baselines; experiment tracking and model registration via SQLite-backed MLflow; containerized REST inference via FastAPI and Docker; distribution drift and error monitoring; and interactive 24h forecasting in Streamlit.
+- **Master Pipeline Orchestration (`run_full_pipeline.py`)**: A single unified command executing incremental ingestion, cleaning, AQI calculation, ML feature engineering, model training, MLflow logging, and automated test suite verification in one command.
+
+---
+
+## Single-Command Full Pipeline Orchestration
+
+To run the complete end-to-end pipeline from data ingestion to model training and verification with a single command:
+
+```bash
+python run_full_pipeline.py
+```
+
+### Supported CLI Options:
+
+| Command | Action |
+|---|---|
+| `python run_full_pipeline.py` | **Default**: Incremental ingestion through current time, end-to-end preprocessing, AQI calculation, ML feature engineering, model retraining, MLflow logging, and automated testing. |
+| `python run_full_pipeline.py --dry-run` | **Dry Run**: Inspects the planned ingestion window, target stations, and execution order without writing data or training models. |
+| `python run_full_pipeline.py --start 2026-09-01 --end 2026-10-14` | **Historical Backfill**: Fetches a specific historical date range and runs downstream stages. |
+| `python run_full_pipeline.py --skip-ingestion` | **Local Pipeline Rebuild**: Skips network API ingestion; re-cleans and trains on existing raw data. |
+| `python run_full_pipeline.py --skip-training` | **Data & Feature Sync**: Ingests new data and rebuilds cleaned, gold, and ML feature datasets without retraining models. |
+
+### Key Guarantees:
+- **Idempotent Checkpointing**: State is maintained in `logs/ingestion_checkpoint.json` with a 2-hour lookback buffer for delayed observations. Checkpoints are updated only after raw data is successfully written to disk.
+- **Fail-Fast Safety**: Downstream execution (including feature building and model promotion) immediately halts if any upstream stage fails.
+- **Full Backward Compatibility**: Part 1 and Part 2 entry points, database schemas, and FastAPI contracts remain completely intact. Detailed report available in [`reports/full_pipeline_orchestration.md`](file:///f:/air-quality-aqi-project/reports/full_pipeline_orchestration.md).
 
 ---
 
@@ -123,10 +150,12 @@ air-quality-aqi-project/
 │   └── validation/               # Rule-based data quality checks
 ├── tests/
 │   ├── test_pipeline.py          # Part 1 data pipeline tests
-│   └── test_ml.py                # Part 2 MLOps, features, MLflow, API, and monitoring tests
+│   ├── test_ml.py                # Part 2 MLOps, features, MLflow, API, and monitoring tests
+│   └── test_orchestrator.py      # Master orchestrator regression & checkpoint tests
 ├── Dockerfile                    # Container definition for inference service
 ├── docker-compose.yml            # Docker Compose orchestration
 ├── requirements.txt              # Project dependencies
+├── run_full_pipeline.py          # Unified master pipeline orchestrator
 └── README.md                     # Complete project documentation
 ```
 
@@ -246,11 +275,58 @@ python src/transformation/join_data.py
 python src/transformation/calculate_aqi.py
 ```
 
-### Running via Apache Airflow (Optional)
-DAG file: `airflow/dags/aqi_pipeline.py` (`schedule="@daily"`).
+### Running via Apache Airflow
+
+The project includes an Apache Airflow DAG located at `airflow/dags/aqi_pipeline.py` (`dag_id="aqi_pipeline"`, scheduled `@daily`).
+
+Each task in the DAG executes the pipeline stages sequentially (`collect` → `clean` → `quality_checks` → `join` → `calculate_aqi`).
+
+#### Option 1: Run Airflow with Docker (Recommended for Windows / Mac / Linux)
+
+Run Airflow and its PostgreSQL backend via Docker Compose:
+
+1. **Start Airflow and PostgreSQL**:
+   ```bash
+   docker compose up -d
+   ```
+
+2. **Trigger and Test the DAG End-to-End Inside the Container**:
+   ```bash
+   docker exec -it aqi_airflow airflow dags test aqi_pipeline 2026-09-01
+   ```
+
+3. **Test an Individual Task Inside the Container**:
+   ```bash
+   docker exec -it aqi_airflow airflow tasks test aqi_pipeline collect_openaq 2026-09-01
+   docker exec -it aqi_airflow airflow tasks test aqi_pipeline calculate_aqi 2026-09-01
+   ```
+
+4. **Access the Airflow Web UI**:
+   - Open [http://localhost:8080](http://localhost:8080)
+   - To retrieve the auto-generated standalone admin password:
+     ```bash
+     docker exec -it aqi_airflow cat /opt/airflow/standalone_admin_password.txt
+     ```
+
+5. **Stop Airflow Containers**:
+   ```bash
+   docker compose down
+   ```
+
+---
+
+#### Option 2: Run Without Docker / Locally (Linux / macOS / WSL)
+If you have Airflow installed locally:
 ```bash
-# Test DAG parse & task execution
+export AIRFLOW_HOME="$(pwd)/airflow"
+export PYTHONPATH="."
+airflow db init
 airflow dags test aqi_pipeline 2026-09-01
+```
+
+#### Option 3: Run Without Airflow on Native Windows
+```powershell
+python run_full_pipeline.py
 ```
 
 ---
@@ -448,7 +524,7 @@ Open [http://localhost:8501](http://localhost:8501) in your browser.
 
 ## Automated Testing
 
-The repository includes a comprehensive 21-test suite validating the data pipeline, feature engineering, leakage prevention, temporal ordering, model training, MLflow versioning, API validation, and monitoring reports.
+The repository includes a comprehensive 26-test suite validating the data pipeline, feature engineering, leakage prevention, temporal ordering, model training, MLflow versioning, API validation, monitoring reports, and master orchestrator checkpoint/execution safety.
 
 ### Run All Tests:
 
@@ -470,7 +546,7 @@ set PYTHONPATH=.
 pytest -v
 ```
 
-**Verification Status**: `21 passed in 11.47s` (100% passing).
+**Verification Status**: `26 passed in 33.21s` (100% passing).
 
 ---
 

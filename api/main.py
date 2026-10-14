@@ -53,6 +53,8 @@ def get_aqi_category(aqi: float) -> str:
     return "Severe"
 
 
+import math
+
 class PredictionRequest(BaseModel):
     # Generalised grid cell (~11km), NOT exact coords / station_id.
     lat_gen: float = Field(ge=-90, le=90, examples=[13.0])
@@ -61,6 +63,7 @@ class PredictionRequest(BaseModel):
     aqi_lag1: float = Field(ge=AQI_MIN, le=AQI_MAX, examples=[58.0])
     aqi_lag2: float = Field(ge=AQI_MIN, le=AQI_MAX, examples=[55.0])
     aqi_lag3: float = Field(ge=AQI_MIN, le=AQI_MAX, examples=[60.0])
+    aqi_lag24: float = Field(ge=AQI_MIN, le=AQI_MAX, examples=[65.0])
     aqi_roll_mean_3: float = Field(examples=[57.0])
     aqi_roll_std_3: float = Field(ge=0, examples=[2.5])
     aqi_roll_mean_7: float = Field(examples=[59.0])
@@ -69,6 +72,11 @@ class PredictionRequest(BaseModel):
     hour: int = Field(ge=0, le=23, examples=[10])
     dayofweek: int = Field(ge=0, le=6, examples=[1])
     month: int = Field(ge=1, le=12, examples=[3])
+    # Cyclical representations (optional in payload; calculated automatically if omitted)
+    hour_sin: float | None = Field(default=None, examples=[-0.5])
+    hour_cos: float | None = Field(default=None, examples=[-0.866])
+    dayofweek_sin: float | None = Field(default=None, examples=[0.782])
+    dayofweek_cos: float | None = Field(default=None, examples=[0.623])
 
 
 class PredictionResponse(BaseModel):
@@ -149,10 +157,19 @@ def predict(payload: PredictionRequest) -> PredictionResponse:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     start = time.perf_counter()
-    row = pd.DataFrame(
-        [[getattr(payload, c) for c in FEATURE_COLUMNS]],
-        columns=FEATURE_COLUMNS,
-    )
+    # Build dictionary of features conforming to FEATURE_COLUMNS
+    feature_dict = {c: getattr(payload, c, None) for c in FEATURE_COLUMNS}
+    # Auto-derive cyclical features if not explicitly provided
+    if feature_dict.get("hour_sin") is None:
+        feature_dict["hour_sin"] = math.sin(2.0 * math.pi * payload.hour / 24.0)
+    if feature_dict.get("hour_cos") is None:
+        feature_dict["hour_cos"] = math.cos(2.0 * math.pi * payload.hour / 24.0)
+    if feature_dict.get("dayofweek_sin") is None:
+        feature_dict["dayofweek_sin"] = math.sin(2.0 * math.pi * payload.dayofweek / 7.0)
+    if feature_dict.get("dayofweek_cos") is None:
+        feature_dict["dayofweek_cos"] = math.cos(2.0 * math.pi * payload.dayofweek / 7.0)
+
+    row = pd.DataFrame([[feature_dict[c] for c in FEATURE_COLUMNS]], columns=FEATURE_COLUMNS)
     if row.isna().any().any():
         raise HTTPException(status_code=422, detail="Missing feature values.")
     predicted_aqi = float(_regressor.predict(row)[0])

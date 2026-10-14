@@ -59,10 +59,28 @@ collect_weather─┘   clean_weather ────┼─→ quality_checks → j
 
 Python, Pandas, Requests, SQLAlchemy + psycopg2, PostgreSQL, Apache Airflow, Streamlit, Plotly.
 
-## 6. Part 2 Extension (Not yet implemented)
+## 6. Master Pipeline Orchestration (`run_full_pipeline.py`)
 
-Same gold layer feeds MLflow feature pipeline (lag/rolling), FastAPI + Docker, monitoring for drift.
+In addition to the Airflow `@daily` DAG, the project provides a unified master orchestration script (`run_full_pipeline.py`) that executes the entire pipeline in dependency order:
+
+1. **Incremental Ingestion Window**: Computes missing UTC window using `logs/ingestion_checkpoint.json` with a 2-hour lookback buffer for delayed observations.
+2. **Data Extraction**: Pulls active OpenAQ Bengaluru stations and Open-Meteo hourly weather observations.
+3. **Persistence & Checkpointing**: Persists raw JSON dumps; checkpoints update only upon successful write.
+4. **Preprocessing & Quality Checks**: Executes `clean_pollution.py`, `clean_weather.py`, and `quality_checks.py`.
+5. **Gold Analytics Transformations**: Joins data (`join_data.py`) and calculates Indian CPCB AQI (`calculate_aqi.py`).
+6. **ML Feature Engineering**: Reconstructs `data/gold/ml_features.csv` via `build_features.py` with leak-free lags and target window alignment.
+7. **Model Training & Registry**: Retrains regression and classification models (`train.py`) and logs to MLflow.
+8. **Automated Verification**: Runs full regression test suite (`tests/`).
+
+Supports `--dry-run`, `--start YYYY-MM-DD --end YYYY-MM-DD` (backfill), `--skip-ingestion`, and `--skip-training`.
 
 ## 7. Setup Evidence
 
-See `README.md` for `pip install -r requirements.txt`, `.env` config, `python src/...` sequential run and `streamlit run dashboard/app.py`.
+See `README.md` for `pip install -r requirements.txt`, `.env` config, `python run_full_pipeline.py`, and `streamlit run dashboard/app.py`.
+
+## 8. Automated Testing
+
+Total 26 automated tests passing across:
+- `tests/test_pipeline.py`: Part 1 data pipeline, raw landing, staging, and gold AQI.
+- `tests/test_ml.py`: Target alignment (T+24h ±2h), leakage prevention, chronological split, FastAPI endpoints, monitoring.
+- `tests/test_orchestrator.py`: Checkpoint derivation, atomic save/reload, dry-run safety, and fail-fast stage halting.

@@ -10,33 +10,26 @@ RAW_DIR = Path("data/raw/openaq")
 STAGING_DIR = Path("data/staging")
 
 
-def load_latest_measurements():
-    # Find the latest measurements JSON file
-    files = list(RAW_DIR.glob("measurements_*.json"))
-
+def load_all_measurements():
+    files = sorted(list(RAW_DIR.glob("measurements_*.json")))
     if not files:
-        raise FileNotFoundError(
-            "No OpenAQ measurement data found."
-        )
-
-    return max(
-        files,
-        key=lambda file: file.stat().st_mtime
-    )
+        raise FileNotFoundError("No OpenAQ measurement data found.")
+    records = []
+    for f in files:
+        with open(f, "r") as fl:
+            try:
+                data = json.load(fl)
+                if isinstance(data, list):
+                    records.extend(data)
+            except Exception as e:
+                print(f"Warning: could not read {f}: {e}")
+    return records
 
 
 def clean_pollution_data():
     print("Starting pollution data transformation...")
-
-    # Load the latest raw measurement file
-    raw_file = load_latest_measurements()
-
-    with open(raw_file, "r") as file:
-        data = json.load(file)
-
-    # Convert measurements into a DataFrame
+    data = load_all_measurements()
     df = pd.json_normalize(data)
-
     print("Raw records:", len(df))
 
     # Select the columns needed for our project
