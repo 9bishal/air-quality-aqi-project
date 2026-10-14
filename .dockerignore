@@ -12,6 +12,5 @@ data/raw/
 mlruns/
 mlartifacts/
 mlflow.db
-airflow/
 logs/
 .DS_Store
