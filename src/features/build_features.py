@@ -73,6 +73,11 @@ TARGET_TIMESTAMP_COL = "target_timestamp"
 # Used when the git-ignored raw landing zone is absent (e.g. fresh clone).
 # Values are rounded to the generalised grid at load time.
 STATION_COORDS_FALLBACK = {
+    # Project Bengaluru stations (BTM Layout, Hebbal, Silk Board)
+    101: (12.9128, 77.6092),
+    102: (13.0339, 77.5913),
+    103: (12.9172, 77.6227),
+    # OpenAQ Bengaluru location IDs
     412: (13.0339, 77.51321111),
     594: (12.91281111, 77.60921944),
     797: (12.9773472, 77.57069722),
@@ -161,7 +166,10 @@ def add_calendar(df: pd.DataFrame) -> pd.DataFrame:
 
 def add_target_24h(group: pd.DataFrame) -> pd.DataFrame:
     """Set target = AQI at T+24h (+/- tolerance), nearest match only."""
+    sid = group["station_id"].iloc[0] if "station_id" in group.columns else getattr(group, "name", None)
     group = group.sort_values("timestamp").copy().reset_index(drop=True)
+    if sid is not None and "station_id" not in group.columns:
+        group["station_id"] = sid
     lookup = group.set_index("timestamp")["aqi"]
     horizon = pd.Timedelta(hours=TARGET_HORIZON_HOURS)
     tol = pd.Timedelta(hours=TARGET_TOLERANCE_HOURS)
@@ -183,7 +191,10 @@ def add_target_24h(group: pd.DataFrame) -> pd.DataFrame:
 
 def add_lag_rolling(group: pd.DataFrame) -> pd.DataFrame:
     """Past-only lags/rolling with staleness guards (no future leakage)."""
+    sid = group["station_id"].iloc[0] if "station_id" in group.columns else getattr(group, "name", None)
     group = group.sort_values("timestamp").copy().reset_index(drop=True)
+    if sid is not None and "station_id" not in group.columns:
+        group["station_id"] = sid
     for lag in LAG_STEPS:
         src_ts = group["timestamp"].shift(lag)
         group[f"aqi_lag{lag}"] = group["aqi"].shift(lag)

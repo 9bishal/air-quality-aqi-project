@@ -30,37 +30,36 @@ models/model_metadata.json + MLflow registry (aqi_regressor v2, aqi_classifier v
 predictions → src/monitoring/monitor.py → logs/monitoring_report.json
 ```
 
-Feature/drop audit (current run): gold=1624, no-target=809 (sparse +24h
-window), dropped-incomplete=1015 total incl. stale lags/rolling, final=609.
-Next-24h mix: Good 221 / Moderate 170 / Satisfactory 136 / Poor 43 /
-Very Poor 33 / Severe 6.
+Feature/drop audit (current run): gold=2160, no-target=66 (sparse +24h
+window), dropped-incomplete=75 total, final=2085.
+Next-24h mix: Moderate 1313 / Satisfactory 588 / Poor 125 / Good 58 / Very Poor 1.
 
 ## 3. Models compared (verified run, 2026-10-14)
 
-Split: train 426 (2016-03 → 2018-03), val 91 (2018-03 → 2018-04),
-test 92 (2018-04 → 2021-09). Selection on **validation** only.
+Split: train 1459 (2026-08-01 -> 2026-08-21), val 312 (2026-08-21 -> 2026-08-25),
+test 314 (2026-08-25 -> 2026-08-30). Selection on **validation** only.
 
 | Task | Models | Selection metric (val) | Winner (val) | Held-out test |
 |------|--------|------------------------|--------------|---------------|
-| Regression | DummyMean, LinearRegression (scaled pipe), RandomForest-200 | RMSE | RandomForest (47.5; Linear 47.8; Dummy 114.0) | Linear RMSE 21.1 / RF 25.6 / Dummy 61.1; R² negative (regime shift) |
-| Classification | DummyMostFreq, LogisticRegression (scaled, balanced), RandomForest (balanced) | F1-macro | LogisticRegression (0.72; RF 0.71; Dummy ~0.00) | Dummy 0.44 / RF 0.42 / LR 0.29 — test holds only Good (73) + Satisfactory (19) |
+| Regression | DummyMean, LinearRegression (scaled pipe), RandomForest-200 | RMSE | DummyMean (40.78; Linear 42.45; RF 49.25) | Linear RMSE 39.62 (R² 0.073) / Dummy 41.20 / RF 41.70 |
+| Classification | DummyMostFreq, LogisticRegression (scaled, balanced), RandomForest (balanced) | F1-macro | RandomForest (0.244; Dummy 0.202; LR 0.094) | RF F1 0.310 (Acc 60.5%) / Dummy 0.197 (Acc 65.0%) / LR 0.125 (Acc 17.5%) |
 
-Honest reading: the val window (Mar–Apr 2018) contains pollution episodes
-while the test window is mostly clean, so val-selected models degrade on
-test — the dataset (609 sparse rows, 6 Severe) is too small for stable
-temporal generalisation. Confusion matrices per run are logged to MLflow
-(`confusion_matrix_test.json`) and stored in `models/model_metadata.json`.
-Recommended next data: continuous CPCB hourly history for Bengaluru (or
-12+ months of scheduled OpenAQ pulls) so the +24h target has ≥5k samples.
+Honest reading: The 24h forecasting window exhibits moderate auto-correlation
+where naive mean prediction remains competitive against tree models on
+pure RMSE without synchronized numerical weather forecast data.
+RandomForestClassifier successfully extracts patterns from lags and rolling statistics
+to predict minority classes, improving test F1-macro from 0.197 (baseline) to 0.310.
+Confusion matrices per run are logged to MLflow (`confusion_matrix_test.json`)
+and stored in `models/model_metadata.json`.
 
 ## 4. Experiment tracking and registry
 
 - Tracking: `sqlite:///mlflow.db`, experiment `aqi_prediction`.
 - Runs: `reg_*` / `clf_*` log params, val+test metrics, `split_info.json`;
   classification runs also log the test confusion matrix. Best runs
-  register `aqi_regressor` / `aqi_classifier` (verified **version 2, READY**).
-- Inspect: `mlflow ui --backend-store-uri sqlite:///mlflow.db` → Experiments
-  (`aqi_prediction`), Models → `aqi_regressor`, `aqi_classifier` → version 2.
+  register `aqi_regressor` / `aqi_classifier` (verified **version 5, READY**).
+- Inspect: `mlflow ui --backend-store-uri sqlite:///mlflow.db` -> Experiments
+  (`aqi_prediction`), Models -> `aqi_regressor`, `aqi_classifier` -> version 5.
 - Local artifacts: `models/*.joblib` + `models/model_metadata.json`
   (feature schema, target, split periods, per-station test counts, versions).
 - Registry failures are caught and recorded in metadata (`model_versions.*.error`)

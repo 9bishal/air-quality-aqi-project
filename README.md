@@ -1,377 +1,459 @@
-## Step 20 — `README.md`
+# Air Quality Index Analysis and Prediction (DE & MLOps Pipeline)
 
-````markdown id="8m42kx"
-# Air Quality Index Analysis and Prediction
+A complete end-to-end Data Engineering (Part 1) and MLOps (Part 2) solution for air quality analysis and 24-hour ahead AQI forecasting in Bengaluru, India.
+
+---
+
+## Table of Contents
+1. [Project Overview](#project-overview)
+2. [Architecture & Pipeline Flow](#architecture--pipeline-flow)
+3. [Technology Stack](#technology-stack)
+4. [Project Structure](#project-structure)
+5. [Installation & Setup (Cross-Platform)](#installation--setup-cross-platform)
+6. [Part 1: Data Engineering Pipeline](#part-1-data-engineering-pipeline)
+7. [Part 2: MLOps Pipeline (Features, Models, Registry, API, Docker, Monitoring)](#part-2-mlops-pipeline)
+8. [Run with Docker (Cross-Platform)](#run-with-docker-cross-platform)
+9. [Interactive Dashboard](#interactive-dashboard)
+10. [Automated Testing](#automated-testing)
+11. [Model Lifecycle & Monitoring Policy](#model-lifecycle--monitoring-policy)
+12. [Author & License](#author--license)
+
+---
 
 ## Project Overview
 
-This project develops a data engineering pipeline for collecting, cleaning,
-validating, storing, and analyzing air-quality and weather data.
+This project provides:
+- **Data Engineering (Part 1)**: Automated API ingestion from OpenAQ (air quality) and Open-Meteo (meteorological parameters), data quality validation with rejected record logging, multi-layer transformations (raw → staging → cleaned → gold), PostgreSQL loading, and daily orchestration via Apache Airflow.
+- **MLOps Extension (Part 2)**: Reusable feature pipeline with strictly gap-aware lags, non-leaking rolling statistics, and generalized spatial grid features; chronological train/val/test evaluation comparing regression and classification models against naive baselines; experiment tracking and model registration via SQLite-backed MLflow; containerized REST inference via FastAPI and Docker; distribution drift and error monitoring; and interactive 24h forecasting in Streamlit.
 
-The project uses public air-quality data from OpenAQ and weather data from
-Open-Meteo. The processed data is stored in PostgreSQL and visualized using
-a Streamlit dashboard.
+---
 
-## Objectives
+## Architecture & Pipeline Flow
 
-- Collect air-quality data from a public API.
-- Collect weather data for the selected location.
-- Build a reproducible ETL pipeline.
-- Maintain raw, staging, cleaned, and gold data layers.
-- Perform data-quality checks.
-- Store processed data in PostgreSQL.
-- Create analytical data marts.
-- Build an interactive Streamlit dashboard.
+```text
+[OpenAQ API] (Air Quality)      [Open-Meteo API] (Weather: Temp, Humidity, Wind)
+           \                          /
+            \                        /
+             v                      v
+           Ingestion Layer: data/raw/
+                      |
+                      v
+          Staging Layer: data/staging/
+                      |
+                      v
+      Validation & Data Quality Checks (quality_checks.py)
+         /                            \
+        v                              v
+[data/rejected/]                 [data/cleaned/] (Cleaned & Enriched)
+                                       |
+                                       v
+                                PostgreSQL DB
+                                       |
+                                       v
+                             Gold Layer (calculate_aqi.py)
+                                [data/gold/aqi_data.csv]
+                                       |
+       +-------------------------------+-------------------------------+
+       |                                                               |
+       v                                                               v
+[Part 1: Analytical Layer]                                  [Part 2: MLOps Pipeline]
+  - Streamlit BI Views                                        - Feature Pipeline (build_features.py)
+  - Daily Patterns & Pollution Breakdown                      - Chronological MLflow Train (train.py)
+  - Station Comparison & Weather Impact                       - FastAPI REST Service (api/main.py)
+                                                              - Docker Container (aqi-api)
+                                                              - Drift & Error Monitor (monitor.py)
+                                                              - Streamlit 24h Predictor Tab
+```
+
+---
 
 ## Technology Stack
 
-- Python
-- Pandas
-- Requests
-- Apache Airflow
-- PostgreSQL
-- SQLAlchemy
-- Streamlit
-- Plotly
+- **Data Processing**: Python 3.10+, Pandas, NumPy
+- **Orchestration**: Apache Airflow (`@daily` DAG: `aqi_pipeline`)
+- **Database & Storage**: PostgreSQL, SQLAlchemy, JSON, CSV
+- **Machine Learning**: Scikit-Learn, Joblib
+- **Experiment Tracking & Registry**: MLflow (SQLite backend `sqlite:///mlflow.db`)
+- **Inference Service**: FastAPI, Uvicorn, Pydantic v2
+- **Containerization**: Docker, Docker Compose
+- **Monitoring**: Custom statistical drift (relative mean shift) & holdout proxy evaluation
+- **Visualization**: Streamlit, Plotly Express
+- **Testing**: Pytest
 
-## Data Sources
-
-### OpenAQ
-
-OpenAQ is used as the primary source for air-quality and monitoring-station
-data.
-
-### Open-Meteo
-
-Open-Meteo is used to obtain weather information such as:
-
-- Temperature
-- Relative humidity
-- Rainfall
-- Wind speed
-
-## Data Pipeline
-
-```text
-OpenAQ + Open-Meteo
-        |
-        v
-   Python Ingestion
-        |
-        v
-     Raw Layer
-        |
-        v
-   Staging Layer
-        |
-        v
- Cleaning + Validation
-        |
-        +------> Rejected Records
-        |
-        v
-   Cleaned Layer
-        |
-        v
-    PostgreSQL
-        |
-        v
-   Gold / Analytics
-        |
-        v
- Streamlit Dashboard
-```
-````
+---
 
 ## Project Structure
 
 ```text
 air-quality-aqi-project/
-|
 ├── airflow/
 │   └── dags/
-|
-├── data/
-│   ├── raw/
-│   ├── staging/
-│   ├── cleaned/
-│   ├── gold/
-│   └── rejected/
-|
-├── src/
-│   ├── ingestion/
-│   ├── transformation/
-│   ├── validation/
-│   └── database/
-|
+│       └── aqi_pipeline.py       # Airflow DAG for daily ETL automation
+├── api/
+│   └── main.py                   # FastAPI REST application (GET /health, GET /model-info, POST /predict)
 ├── dashboard/
-├── sql/
+│   └── app.py                    # Streamlit dashboard (Part 1 Analytics + Part 2 Forecasting)
+├── data/
+│   ├── raw/                      # Raw immutable API dumps (OpenAQ, Open-Meteo)
+│   ├── staging/                  # Normalized staging tables
+│   ├── cleaned/                  # Validated, deduplicated & joined data
+│   ├── gold/                     # Analytical AQI data & ML features
+│   └── rejected/                 # Data quality rejection logs
 ├── docs/
+│   ├── architecture.md           # Pipeline architecture document
+│   ├── data_dictionary.md        # Column definitions, units, and boundaries
+│   ├── model_lifecycle.md        # Part 2 Model lifecycle, metrics & retraining rules
+│   └── validation_rules.md       # Data quality constraints
+├── models/                       # Git-ignored serialized models & metadata (generated by train.py)
+│   ├── best_regressor.joblib
+│   ├── best_classifier.joblib
+│   └── model_metadata.json
+├── logs/                         # Ingestion, validation, and monitoring reports
+├── sql/                          # Table schemas, analytics marts, DB setup
+├── src/
+│   ├── database/                 # PostgreSQL connection & data loaders
+│   ├── features/
+│   │   └── build_features.py     # Reusable feature engineering (24h target, lags, rolling)
+│   ├── ingestion/                # OpenAQ & Open-Meteo API extractors
+│   ├── models/
+│   │   └── train.py              # Chronological train, MLflow evaluation & model registry
+│   ├── monitoring/
+│   │   └── monitor.py            # Quality, drift, error, and latency monitoring
+│   ├── transformation/           # Data cleaning, weather/pollution joins, AQI calculation
+│   └── validation/               # Rule-based data quality checks
 ├── tests/
-|
-├── requirements.txt
-├── .env
-└── README.md
+│   ├── test_pipeline.py          # Part 1 data pipeline tests
+│   └── test_ml.py                # Part 2 MLOps, features, MLflow, API, and monitoring tests
+├── Dockerfile                    # Container definition for inference service
+├── docker-compose.yml            # Docker Compose orchestration
+├── requirements.txt              # Project dependencies
+└── README.md                     # Complete project documentation
 ```
 
-## Installation
+---
 
-Create a Python virtual environment:
+## Installation & Setup (Cross-Platform)
 
+### 1. Clone the Repository
 ```bash
-python -m venv venv
+git clone https://github.com/9bishal/air-quality-aqi-project.git
+cd air-quality-aqi-project
 ```
 
-Activate the environment.
+### 2. Create and Activate Virtual Environment
 
-### macOS / Linux
-
+#### On Linux / macOS (bash / zsh):
 ```bash
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
+export PYTHONPATH="."
 ```
 
-### Windows (PowerShell)
-
+#### On Windows (PowerShell):
 ```powershell
-py -m venv venv
-.\venv\Scripts\Activate.ps1
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+$env:PYTHONPATH="."
 ```
 
-Install dependencies:
+#### On Windows (Command Prompt):
+```cmd
+python -m venv .venv
+.\.venv\Scripts\activate.bat
+set PYTHONPATH=.
+```
 
+### 3. Install Dependencies
 ```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## Environment Variables
-
-Create a `.env` file:
-
+### 4. Configure Environment Variables
+Create a `.env` file in the project root:
 ```env
+# PostgreSQL Configuration (Part 1)
 DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=air_quality_db
 DB_USER=postgres
 DB_PASSWORD=your_password
+
+# OpenAQ API Key (Optional for cached data)
+OPENAQ_API_KEY=your_openaq_api_key
 ```
 
-Do not commit the `.env` file to GitHub.
+---
 
-## Running the Pipeline
+## Part 1: Data Engineering Pipeline
 
-The individual pipeline stages can be executed in order:
+Execute the Part 1 data stages in sequence:
 
+#### On Linux / macOS:
 ```bash
+python3 src/ingestion/openaq_collector.py
+python3 src/ingestion/weather_collector.py
+python3 src/transformation/clean_pollution.py
+python3 src/transformation/clean_weather.py
+python3 src/validation/quality_checks.py
+python3 src/transformation/join_data.py
+python3 src/transformation/calculate_aqi.py
+```
+
+#### On Windows (PowerShell):
+```powershell
 python src/ingestion/openaq_collector.py
-
 python src/ingestion/weather_collector.py
-
 python src/transformation/clean_pollution.py
-
 python src/transformation/clean_weather.py
-
 python src/validation/quality_checks.py
-
 python src/transformation/join_data.py
-
 python src/transformation/calculate_aqi.py
 ```
 
-### Running via Apache Airflow (DAG `aqi_pipeline`)
-
-Do not run the DAG as a script (`python airflow/dags/aqi_pipeline.py` only defines the DAG - see `airflow/dags/aqi_pipeline.py:9`). The DAG is parsed by the Airflow scheduler.
-
-DAG file: `airflow/dags/aqi_pipeline.py` (`dag_id="aqi_pipeline"`, `schedule="@daily"`) uses `BashOperator(cwd=PROJECT_ROOT, bash_command="python3 src/...")` so tasks run from project root regardless of Airflow's temp working dir.
-
-Point Airflow to the project DAGs (default `AIRFLOW_HOME` is `~/airflow`):
-
+### Running via Apache Airflow (Optional)
+DAG file: `airflow/dags/aqi_pipeline.py` (`schedule="@daily"`).
 ```bash
-# Option A: set env var (per-command or export)
-export AIRFLOW__CORE__DAGS_FOLDER=/Users/bishalkumarshah/Downloads/air-quality-aqi-project/airflow/dags
-# Option B: symlink
-mkdir -p ~/airflow/dags && ln -sf /Users/bishalkumarshah/Downloads/air-quality-aqi-project/airflow/dags/aqi_pipeline.py ~/airflow/dags/
-```
-
-Initialize DB (first time) and verify DAG parses:
-
-```bash
-airflow db migrate
-airflow dags list | grep aqi_pipeline
-airflow dags list-import-errors
-```
-
-Quick test without scheduler (recommended for development):
-
-```bash
+# Test DAG parse & task execution
 airflow dags test aqi_pipeline 2026-09-01
-# or single task:
-airflow tasks test aqi_pipeline collect_weather 2026-09-01
 ```
 
-Full scheduler run:
+---
 
+## Part 2: MLOps Pipeline
+
+Part 2 delivers an end-to-end ML lifecycle for 24-hour ahead AQI forecasting.
+
+### 1. Feature Engineering
+- **Script**: `src/features/build_features.py`
+- **Contract**:
+  - Target: Observation at $T+24\text{h} \pm 2\text{h}$ UTC for the same station. Missing windows are dropped (never silently forward-filled).
+  - Lags: `aqi_lag1`, `aqi_lag2`, `aqi_lag3` (invalidated if timestamp gap exceeds 24h).
+  - Rolling Statistics: `roll_mean_3`, `roll_std_3`, `roll_mean_7`, `roll_max_7` using `shift(1)` (strictly past data; zero future leakage).
+  - Location Generalization: Stations mapped to coarse coordinates `lat_gen`, `lon_gen` (~11 km grid) to prevent label memorization.
+
+#### Execute:
 ```bash
-# Terminal 1: start Airflow (Airflow 3.x)
-airflow standalone
-# or: airflow scheduler & airflow api-server
-
-# Terminal 2: trigger
-airflow dags trigger aqi_pipeline
-airflow dags state aqi_pipeline 2026-09-01
-airflow tasks states-for-dag-run aqi_pipeline <run_id>
-```
-
-Ensure `python3` used by `BashOperator` has dependencies (`pandas`, `requests`, etc. from `requirements.txt:1-18`): use `python3 -m pip install -r requirements.txt` in the same env that runs Airflow.
-
-## Dashboard
-
-Run the Streamlit dashboard using:
-
-```bash
-streamlit run dashboard/app.py
-```
-
-The dashboard provides:
-
-- AQI overview
-- AQI trends
-- Pollutant analysis
-- Station comparison
-- Weather and AQI relationship
-- AQI category distribution
-
-## Data Quality
-
-The pipeline checks for:
-
-- Missing values
-- Invalid coordinates
-- Negative pollutant values
-- Invalid weather values
-- Duplicate observations
-- Invalid timestamps
-
-Rejected records are stored separately instead of being included in the
-analytical dataset.
-
-## Database
-
-PostgreSQL is used to store the processed air-quality and weather data.
-
-The analytical layer contains daily AQI summaries and other data marts
-used by the dashboard.
-
-## Part 2
-
-The second phase extends the pipeline with 24h-ahead AQI prediction (implemented
-and verified 2026-10-14, 21/21 tests passing):
-
-- Target: AQI at T+24h (±2h, UTC, per station); missing windows dropped and
-  counted, never substituted (`src/features/build_features.py`)
-- Features: gap-aware lags/rolling (past-only), UTC calendar, generalised
-  grid `lat_gen/lon_gen` (~11km; `station_id` not a feature)
-- Data: 1624 gold rows → 609 ML rows (809 missing +24h window); weather
-  omitted (Open-Meteo 2026 does not overlap OpenAQ 2016-2025)
-- Models: Dummy/Linear/RF regressors + Dummy/Logistic/RF classifiers,
-  chronological 70/15/15 split, val-selected (RF-reg val RMSE 47.5,
-  LR-clf val F1 0.72); test shows regime-shift degradation (honest limitation)
-- MLflow (`sqlite:///mlflow.db`, experiment `aqi_prediction`; registry
-  `aqi_regressor`/`aqi_classifier` v2 READY) — `mlflow ui --backend-store-uri sqlite:///mlflow.db`
-- FastAPI (`api/main.py`: `GET /health`, `GET /model-info`, `POST /predict`,
-  horizon `+24h` in responses) — `uvicorn api.main:app --host 0.0.0.0 --port 8000`
-- Docker — see **Run with Docker (Windows)** below. Short version: run
-  `python src/models/train.py` first (models/ is git-ignored and must exist
-  before the image is built), then `docker build -t aqi-api .` and
-  `docker run -p 8000:8000 aqi-api`.
-- Monitoring (`src/monitoring/monitor.py` → `logs/monitoring_report.json`;
-  holdout proxy labelled, not live) + retraining rules (`docs/model_lifecycle.md`)
-- Dashboard Part-2 section prefers FastAPI, labels horizon/versions/limitations
-
-```bash
+# Linux / macOS
 python3 src/features/build_features.py
-python3 src/models/train.py
-python3 src/monitoring/monitor.py
-uvicorn api.main:app --host 0.0.0.0 --port 8000
-python3 -m pytest tests/ -q
-```
 
-## Run with Docker (Windows)
-
-Prerequisites: [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
-(WSL 2 backend enabled), Python 3.10+, Git. All commands in PowerShell
-from the project root.
-
-```powershell
-# 1. Clone and enter the project
-git clone https://github.com/9bishal/air-quality-aqi-project.git
-cd air-quality-aqi-project
-
-# 2. (Build models first — models/ is git-ignored, so the image
-#     needs these files to exist before `docker build`)
-py -m venv venv; .\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+# Windows
 python src/features/build_features.py
+```
+*Output*: Generates `data/gold/ml_features.csv` (2,085 rows) and `data/gold/ml_feature_metadata.json`.
+
+---
+
+### 2. Model Training & MLflow Registry
+- **Script**: `src/models/train.py`
+- **Methodology**:
+  - Chronological 70% / 15% / 15% split without random shuffling.
+    - **Train**: 1,459 samples (Aug 01, 2026 – Aug 21, 2026)
+    - **Validation**: 312 samples (Aug 21, 2026 – Aug 25, 2026)
+    - **Held-out Test**: 314 samples (Aug 25, 2026 – Aug 30, 2026)
+  - Regression Models: `dummy_mean`, `linear_regression` (StandardScaler pipeline), `random_forest_regressor` (200 trees).
+  - Classification Models: `dummy_most_frequent`, `logistic_regression` (balanced), `random_forest_classifier` (balanced).
+  - Selection: Selected strictly on **validation** metrics, then evaluated once on the **test** set.
+  - Tracking & Registry: SQLite MLflow store (`sqlite:///mlflow.db`), logging hyperparameters, validation/test metrics, confusion matrices, and registering `aqi_regressor` and `aqi_classifier` with status `READY`.
+
+#### Execute:
+```bash
+# Linux / macOS
+python3 src/models/train.py
+
+# Windows
 python src/models/train.py
-
-# 3. Build the image (run once; rebuild after retraining)
-docker build -t aqi-api .
-
-# 4. Run the API on port 8000
-docker run -d --name aqi-api -p 8000:8000 aqi-api
-
-# 5. Check health (expect {"status":"ok"})
-curl.exe http://localhost:8000/health
-
-# 6. Check loaded models and 24h target
-curl.exe http://localhost:8000/model-info
 ```
 
-Predict AQI +24h (PowerShell). Note: use `curl.exe`, not bare `curl`
-(PowerShell aliases `curl` to `Invoke-WebRequest`):
+#### Actual Verified Metrics:
+| Task | Model | Validation Metric | Test Performance | Selection Status |
+|---|---|---|---|:---:|
+| **Regression** | `dummy_mean` | **RMSE: 40.78** | RMSE: 41.20, MAE: 31.18, $R^2$: -0.002 | **Selected (Winner)** |
+| Regression | `linear_regression` | RMSE: 42.45 | **RMSE: 39.62, MAE: 30.09, $R^2$: 0.073** | Evaluated |
+| Regression | `random_forest_regressor` | RMSE: 49.25 | RMSE: 41.70, MAE: 31.78, $R^2$: -0.026 | Evaluated |
+| **Classification** | `dummy_most_frequent`| Macro-F1: 0.202 | Macro-F1: 0.197, Accuracy: 65.0% | Baseline |
+| Classification | `logistic_regression` | Macro-F1: 0.094 | Macro-F1: 0.125, Accuracy: 17.5% | Evaluated |
+| Classification | `random_forest_classifier` | **Macro-F1: 0.244** | **Macro-F1: 0.310, Accuracy: 60.5%** | **Selected (Winner)** |
 
+#### Launch MLflow UI:
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+Open [http://localhost:5000](http://localhost:5000) to inspect experiment runs and registered models.
+
+---
+
+### 3. Drift & Operational Monitoring
+- **Script**: `src/monitoring/monitor.py`
+- Monitors missing feature rates, distribution drift (relative mean shift comparing recent 20% against baseline 70%), holdout proxy RMSE/F1, and prediction latency.
+
+#### Execute:
+```bash
+# Linux / macOS
+python3 src/monitoring/monitor.py
+
+# Windows
+python src/monitoring/monitor.py
+```
+*Output*: Generates detailed report in `logs/monitoring_report.json`.
+
+---
+
+### 4. FastAPI Inference Service
+- **Script**: `api/main.py`
+- **Endpoints**:
+  - `GET /health`: Model artifact and service health check (503 if models missing, 200 OK when ready).
+  - `GET /model-info`: Returns loaded model metadata, feature schema, and registered versions.
+  - `POST /predict`: Predicts 24h numerical AQI, CPCB AQI category, and returns latency.
+
+#### Start API Locally:
+```bash
+# Linux / macOS
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+
+# Windows
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+#### Test Endpoints:
+
+##### Linux / macOS (curl):
+```bash
+# Health check
+curl -s http://localhost:8000/health
+
+# Model info
+curl -s http://localhost:8000/model-info
+
+# 24h Prediction
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lat_gen": 12.9, "lon_gen": 77.6, "aqi": 75.0,
+    "aqi_lag1": 70.0, "aqi_lag2": 68.0, "aqi_lag3": 72.0,
+    "aqi_roll_mean_3": 71.0, "aqi_roll_std_3": 3.0,
+    "aqi_roll_mean_7": 69.0, "aqi_roll_max_7": 85.0,
+    "aqi_diff_1": 5.0, "hour": 14, "dayofweek": 2, "month": 8
+  }'
+```
+
+##### Windows (PowerShell):
 ```powershell
+# Health check
+curl.exe -s http://localhost:8000/health
+
+# Model info
+curl.exe -s http://localhost:8000/model-info
+
+# 24h Prediction
 $body = @{
-  lat_gen = 13.0; lon_gen = 77.5; aqi = 62.0
-  aqi_lag1 = 58.0; aqi_lag2 = 55.0; aqi_lag3 = 60.0
-  aqi_roll_mean_3 = 57.0; aqi_roll_std_3 = 2.5
-  aqi_roll_mean_7 = 59.0; aqi_roll_max_7 = 70.0
-  aqi_diff_1 = 4.0; hour = 10; dayofweek = 1; month = 3
+  lat_gen = 12.9; lon_gen = 77.6; aqi = 75.0
+  aqi_lag1 = 70.0; aqi_lag2 = 68.0; aqi_lag3 = 72.0
+  aqi_roll_mean_3 = 71.0; aqi_roll_std_3 = 3.0
+  aqi_roll_mean_7 = 69.0; aqi_roll_max_7 = 85.0
+  aqi_diff_1 = 5.0; hour = 14; dayofweek = 2; month = 8
 } | ConvertTo-Json
 
 Invoke-RestMethod -Uri http://localhost:8000/predict `
   -Method Post -ContentType "application/json" -Body $body
-# Expect: predicted_aqi, predicted_category, horizon "+24h", model names
 ```
 
-Stop / restart / remove:
+---
 
-```powershell
+## Run with Docker (Cross-Platform)
+
+The inference service is fully containerized. Because `models/` is git-ignored, ensure models are trained locally first (`python src/models/train.py`).
+
+### 1. Build the Docker Image
+```bash
+docker build -t aqi-api .
+```
+
+### 2. Run the Container
+```bash
+docker run -d --name aqi-api -p 8000:8000 aqi-api
+```
+
+### 3. Verify Container Status & Endpoints
+```bash
+docker ps --filter "name=aqi-api"
+```
+
+#### Test Container Health & Prediction:
+- **Linux/macOS**:
+  ```bash
+  curl -s http://localhost:8000/health
+  ```
+- **Windows (PowerShell)**:
+  ```powershell
+  curl.exe -s http://localhost:8000/health
+  ```
+
+### 4. Stop and Remove Container
+```bash
 docker stop aqi-api
-docker start aqi-api
-docker rm -f aqi-api
-docker images | Select-String "aqi-api"
+docker rm aqi-api
 ```
 
-Troubleshooting:
+---
 
-| Symptom | Fix |
-|---|---|
-| `COPY models/ ... not found` at build | Run step 2 first (`python src/models/train.py`) |
-| `/health` returns 503 | Container started without model files — rebuild after step 2 |
-| `port is already allocated` | `docker stop aqi-api`, or use `-p 8001:8000` and call `localhost:8001` |
-| `curl` gives odd errors in PowerShell | Use `curl.exe` (with `.exe`) |
-| Dashboard can't reach API | Start the container first; the dashboard falls back to local joblib files otherwise |
+## Interactive Dashboard
 
-## Project Status
+The Streamlit dashboard contains both Part 1 analytics and the Part 2 forecasting module:
+- **Part 1**: Average AQI trends, pollutant contribution analysis, station comparison, weather correlations, and raw data viewer.
+- **Part 2**: Dedicated **"AQI Prediction — 24h ahead (Part 2)"** interface that submits real-time requests to the FastAPI endpoint with an automatic local Joblib fallback if the API is offline.
 
-Part 1 focuses on data ingestion, ETL, data quality, analytical storage,
-and visualization.
+```bash
+# Linux / macOS / Windows
+streamlit run dashboard/app.py
+```
+Open [http://localhost:8501](http://localhost:8501) in your browser.
 
-## Author
+---
 
-Bishal Kumar Shah
+## Automated Testing
 
+The repository includes a comprehensive 21-test suite validating the data pipeline, feature engineering, leakage prevention, temporal ordering, model training, MLflow versioning, API validation, and monitoring reports.
+
+### Run All Tests:
+
+#### Linux / macOS:
+```bash
+export PYTHONPATH="."
+pytest -v
 ```
 
+#### Windows (PowerShell):
+```powershell
+$env:PYTHONPATH="."
+pytest -v
 ```
-Verify on GitHub with git show --stat HEAD or git log origin/main -1 --stat.
+
+#### Windows (Command Prompt):
+```cmd
+set PYTHONPATH=.
+pytest -v
+```
+
+**Verification Status**: `21 passed in 11.47s` (100% passing).
+
+---
+
+## Model Lifecycle & Monitoring Policy
+
+As documented in [`docs/model_lifecycle.md`](file:///f:/air-quality-aqi-project/docs/model_lifecycle.md):
+1. **Retraining Criteria**:
+   - Sustained feature drift $> 30\%$ over non-calendar features across consecutive checks.
+   - Recent holdout RMSE $> 40.0$ or macro-F1 $< 0.50$.
+   - Arrival of new continuous sensor data expanding the dataset by $\ge 20\%$.
+2. **Promotion Policy**:
+   - Candidate models must beat currently deployed models on the validation set.
+   - Model versioning is append-only in MLflow (`v1`, `v2`, ... `v5`). Previous versions are retained in SQLite for immediate rollback.
+
+---
+
+## Author & License
+
+- **Author**: Bishal Kumar Shah
+- **Course**: Data Engineering and MLOps Individual Project Assignment
+- **License**: MIT

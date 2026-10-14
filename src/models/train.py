@@ -123,10 +123,10 @@ def train() -> dict:
         f"val={len(val_df)} test={len(test_df)}"
     )
     print(
-        f"Train period: {train_df['timestamp'].min()} → {train_df['timestamp'].max()}"
+        f"Train period: {train_df['timestamp'].min()} -> {train_df['timestamp'].max()}"
     )
-    print(f"Val   period: {val_df['timestamp'].min()} → {val_df['timestamp'].max()}")
-    print(f"Test  period: {test_df['timestamp'].min()} → {test_df['timestamp'].max()}")
+    print(f"Val   period: {val_df['timestamp'].min()} -> {val_df['timestamp'].max()}")
+    print(f"Test  period: {test_df['timestamp'].min()} -> {test_df['timestamp'].max()}")
     print("Test samples per station:")
     print(test_df.groupby("station_id").size().to_string())
     print("Test class balance:")
@@ -286,14 +286,11 @@ def train() -> dict:
                         name="model",
                         registered_model_name=reg_name,
                     )
-                versions = mlflow.search_model_versions(f"name='{reg_name}'")
-                if versions:
-                    def _vnum(v):
-                        try:
-                            return int(v.version)
-                        except (TypeError, ValueError):
-                            return -1
-                    latest = max(versions, key=_vnum)
+                from mlflow.tracking import MlflowClient
+                client = MlflowClient()
+                reg_model = client.get_registered_model(reg_name)
+                if reg_model.latest_versions:
+                    latest = reg_model.latest_versions[0]
                     metadata["model_versions"][reg_name] = {
                         "version": str(latest.version),
                         "status": str(latest.status),
