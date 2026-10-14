@@ -6,7 +6,11 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 
 # Project root so BashOperator works regardless of Airflow's temp cwd
-PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
+# Checks for container path /opt/airflow or local repo root
+if Path("/opt/airflow/src").exists():
+    PROJECT_ROOT = "/opt/airflow"
+else:
+    PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 
 
 # Create the Airflow DAG
