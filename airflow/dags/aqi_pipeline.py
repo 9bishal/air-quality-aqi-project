@@ -71,6 +71,27 @@ with DAG(
         cwd=PROJECT_ROOT
     )
 
+    # Step 8: Build ML Features (Part 2)
+    build_features = BashOperator(
+        task_id="build_features",
+        bash_command="python3 src/features/build_features.py",
+        cwd=PROJECT_ROOT
+    )
+
+    # Step 9: Train & Validate Models (Part 2)
+    train_models = BashOperator(
+        task_id="train_models",
+        bash_command="python3 src/models/train.py",
+        cwd=PROJECT_ROOT
+    )
+
+    # Step 10: Automated Test Suite Verification
+    run_tests = BashOperator(
+        task_id="run_tests",
+        bash_command="python3 -m pytest tests/test_pipeline.py",
+        cwd=PROJECT_ROOT
+    )
+
     # Define the order in which tasks should run
     collect_openaq >> clean_pollution
     collect_weather >> clean_weather
@@ -78,3 +99,4 @@ with DAG(
     [clean_pollution, clean_weather] >> quality_checks
     quality_checks >> join_data
     join_data >> calculate_aqi
+    calculate_aqi >> build_features >> train_models >> run_tests
