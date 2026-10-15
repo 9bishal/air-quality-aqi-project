@@ -441,6 +441,25 @@ def run_command_stage(step_name: str, cmd: List[str]) -> Tuple[bool, float, str]
     return True, elapsed, proc.stdout
 
 
+def trigger_airflow_dag(dag_id: str = "aqi_pipeline") -> Tuple[bool, str]:
+    """Trigger the DAG in the Airflow docker container if available."""
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", "aqi_airflow", "airflow", "dags", "trigger", dag_id],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if proc.returncode == 0:
+            logger.info("Airflow DAG '%s' triggered successfully via Docker container.", dag_id)
+            return True, proc.stdout
+        logger.warning("Failed to trigger Airflow DAG '%s': %s", dag_id, proc.stderr or proc.stdout)
+        return False, proc.stderr or proc.stdout
+    except Exception as exc:
+        logger.warning("Could not reach Docker Airflow container: %s", exc)
+        return False, str(exc)
+
+
 # -----------------------------------------------------------------------------
 # Main Orchestrator Workflow
 # -----------------------------------------------------------------------------
@@ -451,6 +470,7 @@ def run_full_pipeline(
     skip_ingestion: bool = False,
     skip_training: bool = False,
     skip_tests: bool = False,
+    trigger_airflow: bool = True,
 ) -> Dict[str, Any]:
     """Master pipeline runner executing all stages end-to-end with fail-fast safety."""
     pipeline_start = time.time()
@@ -595,7 +615,6 @@ def run_full_pipeline(
     summary["total_pipeline_duration_sec"] = total_pipeline_time
     summary["pipeline_status"] = "SUCCESS"
 
-    # Gather data layer row counts for summary
     try:
         summary["data_metrics"] = {
             "cleaned_pollution_rows": len(pd.read_csv("data/cleaned/pollution.csv", low_memory=False)),
@@ -606,6 +625,15 @@ def run_full_pipeline(
         }
     except Exception:
         pass
+
+    # Optional Stage 7: Trigger Apache Airflow DAG
+    if trigger_airflow:
+        logger.info("Triggering Apache Airflow DAG ('aqi_pipeline')...")
+        dag_ok, dag_out = trigger_airflow_dag("aqi_pipeline")
+        summary["stages"]["airflow_trigger"] = {
+            "status": "PASSED" if dag_ok else "WARNING",
+            "message": dag_out.strip() if dag_out else "",
+        }
 
     print_final_summary(summary)
     return summary
@@ -683,6 +711,11 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Skip running pytest regression test suite at the end of the pipeline.",
     )
+    parser.add_argument(
+        "--no-airflow",
+        action="store_true",
+        help="Do not trigger the Docker Airflow DAG upon pipeline completion.",
+    )
     args = parser.parse_args()
 
     # Validate option combinations
@@ -714,6 +747,7 @@ def main():
             skip_ingestion=args.skip_ingestion,
             skip_training=args.skip_training,
             skip_tests=args.skip_tests,
+            trigger_airflow=not args.no_airflow,
         )
     except Exception as exc:
         logger.fatal("Full pipeline execution failed: %s", exc)
