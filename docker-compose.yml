@@ -41,7 +41,9 @@ services:
       - ./data:/opt/airflow/data
       - ./logs:/opt/airflow/logs
       - ./sql:/opt/airflow/sql
-    command: standalone
+      - ./models:/opt/airflow/models
+      - ./tests:/opt/airflow/tests
+    command: bash -c "rm -f /opt/airflow/airflow-webserver.pid && exec airflow standalone"
 
   api:
     build:
