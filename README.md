@@ -214,39 +214,71 @@ OPENAQ_API_KEY=your_openaq_api_key
 
 ---
 
-## Quick Start — start commands
+## Quick Start — run everything in order
 
-Build the Part 2 artifacts once, then start each service in its own
-terminal (project root, venv activated). Windows uses `python`,
-macOS/Linux uses `python3`.
+One rule for all commands below: use `python` on Windows,
+`python3` on macOS/Linux. Run every step from the project root
+with the venv activated. Steps 1–6 run once, in order;
+steps 7–9 are the services you keep running (one terminal each).
 
 ```bash
-# One-time build (creates data/gold/ml_features.csv + models/*.joblib)
+# Step 0 — setup (once): venv + dependencies + .env (see above)
+python -m venv .venv
+# Windows PowerShell: .\.venv\Scripts\Activate.ps1
+# macOS/Linux:        source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+```bash
+# Step 1 — Part 1: ingest (needs OPENAQ_API_KEY in .env; skip if data/ exists)
+python src/ingestion/openaq_collector.py
+python src/ingestion/weather_collector.py
+```
+
+```bash
+# Step 2 — Part 1: transform + validate + AQI gold table
+python src/transformation/clean_pollution.py
+python src/transformation/clean_weather.py
+python src/validation/quality_checks.py
+python src/transformation/join_data.py
+python src/transformation/calculate_aqi.py
+```
+
+```bash
+# Step 3 — Part 2: build 24h-ahead features (-> data/gold/ml_features.csv)
 python src/features/build_features.py
+```
+
+```bash
+# Step 4 — Part 2: train, evaluate, register (-> models/*.joblib, mlflow.db)
 python src/models/train.py
 ```
 
 ```bash
-# Terminal 1 — prediction API (http://localhost:8000/health)
+# Step 5 — Part 2: monitoring report (-> logs/monitoring_report.json)
+python src/monitoring/monitor.py
+```
+
+```bash
+# Step 6 — verify everything
+python -m pytest tests/ -q          # expect: 21 passed
+```
+
+```bash
+# Step 7 — Terminal 1: prediction API  -> http://localhost:8000/health
 uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
 ```bash
-# Terminal 2 — dashboard (connects to the API when it is running)
+# Step 8 — Terminal 2: dashboard  -> http://localhost:8501
 streamlit run dashboard/app.py
 ```
 
 ```bash
-# Terminal 3 — MLflow UI (http://127.0.0.1:5000), no Docker needed
+# Step 9 — Terminal 3: MLflow UI  -> http://localhost:5000
+# Tip: start this BEFORE Step 4 to watch runs appear live (refresh the page).
 mlflow ui --backend-store-uri sqlite:///mlflow.db
-# Tip: start this BEFORE training to watch runs appear live —
-# the UI reads mlflow.db while training writes to it (refresh the page).
-```
-
-```bash
-# Anytime checks
-python src/monitoring/monitor.py   # writes logs/monitoring_report.json
-python -m pytest tests/ -q         # expect: 21 passed
 ```
 
 ## Part 1: Data Engineering Pipeline
@@ -561,7 +593,7 @@ pytest -v
 
 ## Model Lifecycle & Monitoring Policy
 
-As documented in [`docs/model_lifecycle.md`](file:///f:/air-quality-aqi-project/docs/model_lifecycle.md):
+As documented in [`docs/model_lifecycle.md`](docs/model_lifecycle.md):
 1. **Retraining Criteria**:
    - Sustained feature drift $> 30\%$ over non-calendar features across consecutive checks.
    - Recent holdout RMSE $> 40.0$ or macro-F1 $< 0.50$.
