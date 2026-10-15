@@ -182,7 +182,7 @@ def add_calendar(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def add_target_24h(group: pd.DataFrame) -> pd.DataFrame:
+def add_target_24h(group: pd.DataFrame, **kwargs) -> pd.DataFrame:
     """Set target = AQI at T+24h (+/- tolerance), nearest match only."""
     sid = group["station_id"].iloc[0] if "station_id" in group.columns else getattr(group, "name", None)
     group = group.sort_values("timestamp").copy().reset_index(drop=True)
@@ -207,7 +207,7 @@ def add_target_24h(group: pd.DataFrame) -> pd.DataFrame:
     return group
 
 
-def add_lag_rolling(group: pd.DataFrame) -> pd.DataFrame:
+def add_lag_rolling(group: pd.DataFrame, **kwargs) -> pd.DataFrame:
     """Past-only lags/rolling with staleness guards (no future leakage)."""
     sid = group["station_id"].iloc[0] if "station_id" in group.columns else getattr(group, "name", None)
     group = group.sort_values("timestamp").copy().reset_index(drop=True)
